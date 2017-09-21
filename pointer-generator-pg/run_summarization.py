@@ -37,15 +37,15 @@ tf.app.flags.DEFINE_string('vocab_path', '', 'Path expression to text vocabulary
 
 # Important settings
 tf.app.flags.DEFINE_string('training_method', 'TF', 'must be one of TF/PG')
-tf.app.flags.DEFINE_string('reward_metric', 'rouge-1', 'must be one of rouge-1/rouge-2/rouge-l')
-tf.app.flags.DEFINE_boolean('use_baseline', True, 'compare with baseline or not when policy gradient training')
+#tf.app.flags.DEFINE_string('reward_metric', 'rouge-1', 'must be one of rouge-1/rouge-2/rouge-l')
+tf.app.flags.DEFINE_boolean('use_baseline', True, 'use baseline to reduce variance or not when policy gradient training')
 tf.app.flags.DEFINE_string('mode', 'train', 'must be one of train/eval/decode')
 tf.app.flags.DEFINE_boolean('single_pass', False, 'For decode mode only. If True, run eval on the full dataset using a fixed checkpoint, i.e. take the current checkpoint, and use it to produce one summary for each example in the dataset, write the summaries to file and then get ROUGE scores for the whole dataset. If False (default), run concurrent decoding, i.e. repeatedly load latest checkpoint, use it to produce summaries for randomly-chosen examples and log the results to screen, indefinitely.')
 
 # Where to save output
 tf.app.flags.DEFINE_integer('max_train_iter', 29000, 'max iterations to train')
-tf.app.flags.DEFINE_integer('save_model_every', 3000, 'save the model every N iterations')
-tf.app.flags.DEFINE_integer('model_max_to_keep', 30, 'save latest N models')
+tf.app.flags.DEFINE_integer('save_model_every', 1000, 'save the model every N iterations')
+tf.app.flags.DEFINE_integer('model_max_to_keep', 10, 'save latest N models')
 tf.app.flags.DEFINE_string('log_root', '', 'Root directory for all logging.')
 tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be saved in a directory with this name, under log_root.')
 tf.app.flags.DEFINE_string('decode_ckpt_path', '', 'checkpoint path for decoding')
