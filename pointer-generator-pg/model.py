@@ -261,7 +261,7 @@ class SummarizationModel(object):
           elif predict_method == 'sample':
             tf.logging.info("Adding attention_decoder sample timestep %i of %i", i, dec_steps)
             predict_word = tf.squeeze(tf.stop_gradient(tf.to_int32(tf.multinomial(log_dist, 1)))) # shape (batch_size,)
-            predict_word = tf.where(self.feed_actions, dec_inputs[i], predict_word)
+          predict_word = tf.where(self.feed_actions, dec_inputs[i], predict_word)
           predict_words.append(predict_word)
         else:
           tf.logging.info("Adding attention_decoder TF timestep %i of %i", i, dec_steps)
@@ -367,10 +367,8 @@ class SummarizationModel(object):
       if hps.training_method == 'TF':
         vocab_scores, log_dists, self.attn_dists, self.p_gens = self._add_decoder(dec_inputs)
       elif hps.training_method == 'PG':
-        self.pred_words_sample, log_dists_sample, attn_dists_sample, p_gens_sample = \
-                                                                   self._add_decoder(dec_inputs)
-        self.pred_words_argmax, log_dists, self.attn_dists, self.p_gens = \
-                                     self._add_decoder(None, predict_method='argmax', reuse=True)
+        self.pred_words_sample, log_dists, self.attn_dists, self.p_gens = self._add_decoder(dec_inputs)
+        self.pred_words_argmax, _, _, _ = self._add_decoder(None, predict_method='argmax', reuse=True)
 
       #self.action_log_probs = action_log_probs_argmax
 
@@ -396,7 +394,6 @@ class SummarizationModel(object):
 
               # Apply dec_padding_mask and get loss
               self._loss = _mask_and_avg(loss_per_step, self._dec_padding_mask)
-            
             else: # baseline model
               # this function applies softmax internally
               self._loss = tf.contrib.seq2seq.sequence_loss(tf.stack(vocab_scores, axis=1), \
@@ -413,7 +410,7 @@ class SummarizationModel(object):
               # mask out the word beyond <END>
               batch_nums = tf.range(0, limit=hps.batch_size) # shape (batch_size,)
               indices = tf.stack((batch_nums, dec_inputs[i]), axis=1) # shape (batch_size, 2)
-              action_log_prob = tf.gather_nd(log_dist_sample, indices) * tf.to_float(mask) # shape (batch_size,)
+              action_log_prob = tf.gather_nd(log_dist, indices) * tf.to_float(mask) # shape (batch_size,)
               action_log_probs.append(action_log_prob)
               predict_masks.append(tf.to_float(mask))
 
@@ -440,7 +437,7 @@ class SummarizationModel(object):
             tf.summary.scalar('baseline', self.baseline_mean)
 
           tf.summary.scalar('loss', self._loss)
-          self.p_gen_avg = tf.reduce_mean(tf.stack(p_gens_sample))
+          self.p_gen_avg = tf.reduce_mean(tf.stack(self.p_gens))
           tf.summary.scalar('p_gen', self.p_gen_avg)
 
           ##############################################################
@@ -451,7 +448,7 @@ class SummarizationModel(object):
               if hps.training_method == 'TF':
                 self._coverage_loss = _coverage_loss(self.attn_dists, self._dec_padding_mask)
               else:
-                self._coverage_loss = _coverage_loss(attn_dists_sample, predict_masks)
+                self._coverage_loss = _coverage_loss(self.attn_dists, predict_masks)
               tf.summary.scalar('coverage_loss', self._coverage_loss)
             self._total_loss = self._loss + hps.cov_loss_wt * self._coverage_loss
             tf.summary.scalar('total_loss', self._total_loss)
@@ -461,6 +458,8 @@ class SummarizationModel(object):
     ##########################################
     if hps.mode == "decode":
       # We run decode beam search mode one decoder step at a time
+      # For policy gradient, results will be the same for running sample decoder or argmax decoder, 
+      # because we will only run one decoder step and will use neither self.pred_words_sample nor self.pred_words_argmax
       assert len(log_dists)==1 # log_dists is a singleton list containing shape (batch_size, extended_vsize)
       log_dists = log_dists[0]
       self._topk_log_probs, self._topk_ids = tf.nn.top_k(log_dists, hps.batch_size*2) # note batch_size=beam_size in decode mode
@@ -508,14 +507,11 @@ class SummarizationModel(object):
     feed_dict[self._dec_batch] = np.zeros((hps.batch_size, hps.max_dec_steps))
     
     t0=time.time()
-    if hps.mode == 'eval':
-      pred_words_argmax = sess.run(self.pred_words_argmax, feed_dict)  # B, S
-      pred_words_argmax[:,-1] = self._vocab.word2id(data.STOP_DECODING)
-    elif hps.mode == 'train' and hps.use_baseline:
+    if hps.use_baseline:
       pred_words_argmax, pred_words_sample = sess.run([self.pred_words_argmax, self.pred_words_sample], feed_dict)  # B, S
       pred_words_argmax[:,-1] = self._vocab.word2id(data.STOP_DECODING)
       pred_words_sample[:,-1] = self._vocab.word2id(data.STOP_DECODING)
-    elif hps.mode == 'train':
+    else:
       pred_words_sample = sess.run(self.pred_words_sample, feed_dict)  # B, S
       pred_words_sample[:,-1] = self._vocab.word2id(data.STOP_DECODING)
     t1=time.time()
@@ -525,33 +521,25 @@ class SummarizationModel(object):
     rewards = []
     t0=time.time()
     for i in range(hps.batch_size):
-      if hps.mode == 'train':
-        # Get rewards
-        gen_sents, score_sample = _summary_score(self._vocab, pred_words_sample[i], \
-                                      batch.original_abstracts_sents[i], \
-                                      batch.original_articles[i], batch.art_oovs[i])
-        rewards.append(score_sample)
-        if i == 0:
-          tf.logging.info('reference summary: %s', ' '.join(batch.original_abstracts_sents[i]))
-          tf.logging.info('sample summary: %s', ' '.join(gen_sents))
+      # Get rewards
+      gen_sents, score_sample = _summary_score(self._vocab, pred_words_sample[i], \
+                                        batch.original_abstracts_sents[i], \
+                                        batch.original_articles[i], batch.art_oovs[i])
+      rewards.append(score_sample)
+      if i == 0:
+        tf.logging.info('reference summary: %s', ' '.join(batch.original_abstracts_sents[i]))
+        tf.logging.info('sample summary: %s', ' '.join(gen_sents))
 
-        # Get advantages
-        if hps.use_baseline:
-          gen_sents, score_argmax = _summary_score(self._vocab, pred_words_argmax[i], \
-                                      batch.original_abstracts_sents[i], \
-                                      batch.original_articles[i], batch.art_oovs[i])
-          advantages.append(score_sample - score_argmax) # len batch_size
-          if i == 0:
-            tf.logging.info('argmax summary: %s', ' '.join(gen_sents))
-        else:
-          advantages.append(score_sample)
-
-      elif hps.mode == 'eval':
+      # Get advantages
+      if hps.use_baseline:
         gen_sents, score_argmax = _summary_score(self._vocab, pred_words_argmax[i], \
                                       batch.original_abstracts_sents[i], \
                                       batch.original_articles[i], batch.art_oovs[i])
-        rewards.append(score_argmax)
-        advantages.append(score_argmax)
+        advantages.append(score_sample - score_argmax) # len batch_size
+        if i == 0:
+          tf.logging.info('argmax summary: %s', ' '.join(gen_sents))
+      else:
+        advantages.append(score_sample)
 
     t1=time.time()
     tf.logging.info('seconds for calc rewards: %.3f', t1-t0)
