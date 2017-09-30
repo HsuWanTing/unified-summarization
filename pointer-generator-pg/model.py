@@ -25,7 +25,7 @@ import data
 import reward_criterion
 from attention_decoder import attention_decoder_one_step
 from tensorflow.contrib.tensorboard.plugins import projector
-from nltk import ngrams
+#from nltk import ngrams
 import multiprocessing
 from joblib import Parallel, delayed
 import pdb
@@ -367,8 +367,10 @@ class SummarizationModel(object):
       if hps.training_method == 'TF':
         vocab_scores, log_dists, self.attn_dists, self.p_gens = self._add_decoder(dec_inputs)
       elif hps.training_method == 'PG':
-        self.pred_words_sample, log_dists, self.attn_dists, self.p_gens = self._add_decoder(dec_inputs)
-        self.pred_words_argmax, _, _, _ = self._add_decoder(None, predict_method='argmax', reuse=True)
+        self.pred_words_sample, log_dists_sample, attn_dists_sample, p_gens_sample = \
+                                                                   self._add_decoder(dec_inputs)
+        self.pred_words_argmax, log_dists, self.attn_dists, self.p_gens = \
+                                     self._add_decoder(None, predict_method='argmax', reuse=True)
 
       #self.action_log_probs = action_log_probs_argmax
 
@@ -411,7 +413,7 @@ class SummarizationModel(object):
               # mask out the word beyond <END>
               batch_nums = tf.range(0, limit=hps.batch_size) # shape (batch_size,)
               indices = tf.stack((batch_nums, dec_inputs[i]), axis=1) # shape (batch_size, 2)
-              action_log_prob = tf.gather_nd(log_dist, indices) * tf.to_float(mask) # shape (batch_size,)
+              action_log_prob = tf.gather_nd(log_dist_sample, indices) * tf.to_float(mask) # shape (batch_size,)
               action_log_probs.append(action_log_prob)
               predict_masks.append(tf.to_float(mask))
 
@@ -438,7 +440,7 @@ class SummarizationModel(object):
             tf.summary.scalar('baseline', self.baseline_mean)
 
           tf.summary.scalar('loss', self._loss)
-          self.p_gen_avg = tf.reduce_mean(tf.stack(self.p_gens))
+          self.p_gen_avg = tf.reduce_mean(tf.stack(p_gens_sample))
           tf.summary.scalar('p_gen', self.p_gen_avg)
 
           ##############################################################
@@ -449,7 +451,7 @@ class SummarizationModel(object):
               if hps.training_method == 'TF':
                 self._coverage_loss = _coverage_loss(self.attn_dists, self._dec_padding_mask)
               else:
-                self._coverage_loss = _coverage_loss(self.attn_dists, predict_masks)
+                self._coverage_loss = _coverage_loss(attn_dists_sample, predict_masks)
               tf.summary.scalar('coverage_loss', self._coverage_loss)
             self._total_loss = self._loss + hps.cov_loss_wt * self._coverage_loss
             tf.summary.scalar('total_loss', self._total_loss)
@@ -506,11 +508,14 @@ class SummarizationModel(object):
     feed_dict[self._dec_batch] = np.zeros((hps.batch_size, hps.max_dec_steps))
     
     t0=time.time()
-    if hps.use_baseline:
+    if hps.mode == 'eval':
+      pred_words_argmax = sess.run(self.pred_words_argmax, feed_dict)  # B, S
+      pred_words_argmax[:,-1] = self._vocab.word2id(data.STOP_DECODING)
+    elif hps.mode == 'train' and hps.use_baseline:
       pred_words_argmax, pred_words_sample = sess.run([self.pred_words_argmax, self.pred_words_sample], feed_dict)  # B, S
       pred_words_argmax[:,-1] = self._vocab.word2id(data.STOP_DECODING)
       pred_words_sample[:,-1] = self._vocab.word2id(data.STOP_DECODING)
-    else:
+    elif hps.mode == 'train':
       pred_words_sample = sess.run(self.pred_words_sample, feed_dict)  # B, S
       pred_words_sample[:,-1] = self._vocab.word2id(data.STOP_DECODING)
     t1=time.time()
@@ -520,23 +525,34 @@ class SummarizationModel(object):
     rewards = []
     t0=time.time()
     for i in range(hps.batch_size):
-      gen_sents, score_sample = _summary_score(self._vocab, pred_words_sample[i], \
-                                    batch.original_abstracts_sents[i], \
-                                    batch.original_articles[i], batch.art_oovs[i])
-      rewards.append(score_sample)
-      if i == 0:
-        tf.logging.info('reference summary: %s', ' '.join(batch.original_abstracts_sents[i]))
-        tf.logging.info('sample summary: %s', ' '.join(gen_sents))
+      if hps.mode == 'train':
+        # Get rewards
+        gen_sents, score_sample = _summary_score(self._vocab, pred_words_sample[i], \
+                                      batch.original_abstracts_sents[i], \
+                                      batch.original_articles[i], batch.art_oovs[i])
+        rewards.append(score_sample)
+        if i == 0:
+          tf.logging.info('reference summary: %s', ' '.join(batch.original_abstracts_sents[i]))
+          tf.logging.info('sample summary: %s', ' '.join(gen_sents))
 
-      if hps.use_baseline:
+        # Get advantages
+        if hps.use_baseline:
+          gen_sents, score_argmax = _summary_score(self._vocab, pred_words_argmax[i], \
+                                      batch.original_abstracts_sents[i], \
+                                      batch.original_articles[i], batch.art_oovs[i])
+          advantages.append(score_sample - score_argmax) # len batch_size
+          if i == 0:
+            tf.logging.info('argmax summary: %s', ' '.join(gen_sents))
+        else:
+          advantages.append(score_sample)
+
+      elif hps.mode == 'eval':
         gen_sents, score_argmax = _summary_score(self._vocab, pred_words_argmax[i], \
                                       batch.original_abstracts_sents[i], \
                                       batch.original_articles[i], batch.art_oovs[i])
-        advantages.append(score_sample - score_argmax) # len batch_size
-        if i == 0:
-          tf.logging.info('argmax summary: %s', ' '.join(gen_sents))
-      else:
-        advantages.append(score_sample)
+        rewards.append(score_argmax)
+        advantages.append(score_argmax)
+
     t1=time.time()
     tf.logging.info('seconds for calc rewards: %.3f', t1-t0)
    
@@ -615,7 +631,7 @@ class SummarizationModel(object):
       feed_dict[self.rewards] = rewards
       feed_dict[self.advantages] = advantages
       feed_dict[self._dec_batch] = actions
-      feed_dict[self.is_sample] = False
+      feed_dict[self.feed_actions] = True
 
     to_return = {
         'summaries': self._summaries,
