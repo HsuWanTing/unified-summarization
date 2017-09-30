@@ -36,7 +36,6 @@ def load_ckpt(saver, sess, ckpt_path=None):
         train_dir = os.path.join(FLAGS.log_root, "train")
         ckpt_state = tf.train.get_checkpoint_state(train_dir)
         ckpt_path = ckpt_state.model_checkpoint_path
-        pdb.set_trace()
       tf.logging.info('Loading checkpoint %s', ckpt_path)
       saver.restore(sess, ckpt_path)
       return ckpt_path
