@@ -261,7 +261,7 @@ class SummarizationModel(object):
           elif predict_method == 'sample':
             tf.logging.info("Adding attention_decoder sample timestep %i of %i", i, dec_steps)
             predict_word = tf.squeeze(tf.stop_gradient(tf.to_int32(tf.multinomial(log_dist, 1)))) # shape (batch_size,)
-          predict_word = tf.where(self.feed_actions, dec_inputs[i], predict_word)
+            predict_word = tf.where(self.feed_actions, dec_inputs[i], predict_word)
           predict_words.append(predict_word)
         else:
           tf.logging.info("Adding attention_decoder TF timestep %i of %i", i, dec_steps)
@@ -368,7 +368,8 @@ class SummarizationModel(object):
         vocab_scores, log_dists, self.attn_dists, self.p_gens = self._add_decoder(dec_inputs)
       elif hps.training_method == 'PG':
         self.pred_words_sample, log_dists, self.attn_dists, self.p_gens = self._add_decoder(dec_inputs)
-        self.pred_words_argmax, _, _, _ = self._add_decoder(None, predict_method='argmax', reuse=True)
+        if hps.mode != 'decode':
+          self.pred_words_argmax, _, _, _ = self._add_decoder(None, predict_method='argmax', reuse=True)
 
       #self.action_log_probs = action_log_probs_argmax
 
@@ -771,7 +772,7 @@ def _coverage_loss(attn_dists, padding_mask):
   return coverage_loss
 
 def _summary_score(vocab, words_idx, ref_sents, article, art_oovs):
-  words_str = data.outputids2words(words_idx, vocab, art_oovs) # list of word strings
+  words_str = data.outputids2words(words_idx, vocab, art_oovs) # list of word strings (remove EOS token)
   gen_sents = data.words2sents(words_str) # list of sentence strings
   #rouge_1, rouge_2, rouge_l = reward_criterion.rouge_scores(gen_sents, ref_sents)
   #result = reward_criterion.rouge_scores_quick(gen_sents, ref_sents, metric=[FLAGS.reward_metric])

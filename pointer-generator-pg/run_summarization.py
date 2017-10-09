@@ -44,8 +44,8 @@ tf.app.flags.DEFINE_boolean('single_pass', False, 'For decode mode only. If True
 
 # Where to save output
 tf.app.flags.DEFINE_integer('max_train_iter', 29000, 'max iterations to train')
-tf.app.flags.DEFINE_integer('save_model_every', 1000, 'save the model every N iterations')
-tf.app.flags.DEFINE_integer('model_max_to_keep', 10, 'save latest N models')
+tf.app.flags.DEFINE_integer('save_model_every', 10, 'save the model every N iterations')
+tf.app.flags.DEFINE_integer('model_max_to_keep', 3, 'save latest N models')
 tf.app.flags.DEFINE_string('log_root', '', 'Root directory for all logging.')
 tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be saved in a directory with this name, under log_root.')
 tf.app.flags.DEFINE_string('decode_ckpt_path', '', 'checkpoint path for decoding')
@@ -101,6 +101,32 @@ def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, decay=0.
   summary_writer.add_summary(loss_sum, step)
   tf.logging.info('running_avg_loss: %f', running_avg_loss)
   return running_avg_loss
+
+
+def calc_running_avg_reward(reward, running_avg_reward, summary_writer, step, decay=0.7):
+  """Calculate the running average reward via exponential decay.
+
+  Args:
+    reward: reward on the most recent eval step
+    running_avg_reward: running_avg_reward so far
+    summary_writer: FileWriter object to write for tensorboard
+    step: training iteration step
+    decay: rate of exponential decay, a float between 0 and 1. Larger is smoother.
+
+  Returns:
+    running_avg_reward: new running average reward
+  """
+  if running_avg_reward == 0:  # on the first iteration just take the loss
+    running_avg_reward = reward
+  else:
+    running_avg_reward = running_avg_reward * decay + (1 - decay) * reward
+  reward_sum = tf.Summary()
+  tag_name = 'running_avg_reward/decay=%f' % (decay)
+  reward_sum.value.add(tag=tag_name, simple_value=running_avg_reward)
+  summary_writer.add_summary(reward_sum, step)
+  tf.logging.info('running_avg_reward: %f', running_avg_reward)
+  return running_avg_reward
+
 
 def convert_to_pointer_model():
   """Load non-pointer checkpoint, add initialized extra variables for pointer, and save as new checkpoint"""
@@ -238,11 +264,15 @@ def run_eval(model, batcher):
   model.build_graph() # build the graph
   saver = tf.train.Saver(max_to_keep=3) # we will keep 3 best checkpoints at a time
   sess = tf.Session(config=util.get_config())
-  eval_dir = os.path.join(FLAGS.log_root, "eval") # make a subdir of the root dir for eval data
+  if "val" in FLAGS.data_path: dataset = "val"
+  elif "test" in FLAGS.data_path: dataset = "test"
+  eval_dir = os.path.join(FLAGS.log_root, "eval_" + dataset) # make a subdir of the root dir for eval data
   bestmodel_save_path = os.path.join(eval_dir, 'bestmodel') # this is where checkpoints of best models are saved
   summary_writer = tf.summary.FileWriter(eval_dir)
   running_avg_loss = 0 # the eval job keeps a smoother, running average loss to tell it when to implement early stopping
+  running_avg_reward = 0
   best_loss = None  # will hold the best loss achieved so far
+  best_reward = None
   train_dir = os.path.join(FLAGS.log_root, "train")
   first_eval_step = True
 
@@ -272,7 +302,8 @@ def run_eval(model, batcher):
     tf.logging.info('loss: %f', loss)
 
     if FLAGS.training_method == 'PG':
-      tf.logging.info("reward_mean: %f", results['reward_mean'])
+      reward = results['reward_mean']
+      tf.logging.info("reward_mean: %f", reward)
 
     if FLAGS.pointer_gen:
       tf.logging.info("pgen_avg: %f", results['p_gen_avg'])
@@ -287,13 +318,20 @@ def run_eval(model, batcher):
 
     # calculate running avg loss
     running_avg_loss = calc_running_avg_loss(np.asscalar(loss), running_avg_loss, summary_writer, train_step)
+    running_avg_reward = calc_running_avg_reward(np.asscalar(reward), running_avg_reward, summary_writer, train_step)
 
     # If running_avg_loss is best so far, save this checkpoint (early stopping).
     # These checkpoints will appear as bestmodel-<iteration_number> in the eval dir
+    if best_reward is None or running_avg_reward > best_reward:
+      tf.logging.info('Found new best model with %.3f running_avg_reward. Saving to %s', running_avg_reward, bestmodel_save_path)
+      saver.save(sess, bestmodel_save_path, global_step=train_step, latest_filename='checkpoint_best')
+      best_reward = running_avg_reward
+    '''
     if best_loss is None or running_avg_loss < best_loss:
       tf.logging.info('Found new best model with %.3f running_avg_loss. Saving to %s', running_avg_loss, bestmodel_save_path)
       saver.save(sess, bestmodel_save_path, global_step=train_step, latest_filename='checkpoint_best')
       best_loss = running_avg_loss
+    '''
 
     # flush the summary writer every so often
     if train_step % 100 == 0:

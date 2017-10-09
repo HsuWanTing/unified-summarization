@@ -75,6 +75,8 @@ class BeamSearchDecoder(object):
       if not os.path.exists(self._rouge_dec_dir): os.mkdir(self._rouge_dec_dir)
       self._rouge_vis_dir = os.path.join(self._decode_dir, "visualize")
       if not os.path.exists(self._rouge_vis_dir): os.mkdir(self._rouge_vis_dir)
+      self._result_dir = os.path.join(self._decode_dir, "result")
+      if not os.path.exists(self._result_dir): os.mkdir(self._result_dir)
 
 
   def decode(self):
@@ -122,11 +124,13 @@ class BeamSearchDecoder(object):
       except ValueError:
         decoded_words = decoded_words
       decoded_output = ' '.join(decoded_words) # single string
+      decoded_sents = data.words2sents(decoded_words)
 
       if FLAGS.single_pass:
         self.write_for_rouge(original_abstract_sents, decoded_words, counter) # write ref summary and decoded summary to file, to eval with pyrouge later
         self.write_for_attnvis(article_withunks, abstract_withunks, decoded_words, best_hyp.attn_dists, \
                                best_hyp.p_gens, best_hyp.log_probs, counter)
+        self.save_result(original_article, original_abstract_sents, decoded_words, counter)
         counter += 1 # this is how many examples we've decoded
       else:
         print_results(article_withunks, abstract_withunks, decoded_output) # log output to screen
@@ -145,6 +149,23 @@ class BeamSearchDecoder(object):
           t0 = time.time()
         '''
 
+  def save_result(self, article_str, reference_sents, decoded_words, index):
+    # First, divide decoded output into sentences
+    decoded_sents = []
+    while len(decoded_words) > 0:
+      try:
+        fst_period_idx = decoded_words.index(".")
+      except ValueError: # there is text remaining that doesn't end in "."
+        fst_period_idx = len(decoded_words)
+      sent = decoded_words[:fst_period_idx+1] # sentence up to and including the period
+      decoded_words = decoded_words[fst_period_idx+1:] # everything else
+      decoded_sents.append(' '.join(sent))
+
+    data = {'article': article_str, 'ref': reference_sents, 'gen': decoded_sents}
+    output_fname = os.path.join(self._result_dir, 'result_%06d.json' % index)
+    with open(output_fname, 'w') as output_file:
+      json.dump(data, output_file)
+    tf.logging.info('Wrote result data to %s', output_fname)
 
   def write_for_rouge(self, reference_sents, decoded_words, ex_index):
     """Write output to file in correct format for eval with pyrouge. This is called in single_pass mode.

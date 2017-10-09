@@ -31,9 +31,9 @@ def get_config():
 def load_ckpt(saver, sess, ckpt_path=None):
   """Load checkpoint from the train directory and restore it to saver and sess, waiting 10 secs in the case of failure. Also returns checkpoint name."""
   while True:
+    train_dir = os.path.join(FLAGS.log_root, "train")
     try:
       if not ckpt_path:
-        train_dir = os.path.join(FLAGS.log_root, "train")
         ckpt_state = tf.train.get_checkpoint_state(train_dir)
         ckpt_path = ckpt_state.model_checkpoint_path
       tf.logging.info('Loading checkpoint %s', ckpt_path)
