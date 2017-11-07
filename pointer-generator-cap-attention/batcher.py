@@ -175,6 +175,8 @@ class Batch(object):
 
     # Determine the maximum length of the caption input sequence in this batch
     max_cap_seq_len = max([ex.cap_len for ex in example_list])
+    if max_cap_seq_len == 0:
+      max_cap_seq_len = 1
 
     # Pad the encoder input sequences up to the length of the longest sequence
     for ex in example_list:

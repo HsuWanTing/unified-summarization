@@ -1,7 +1,8 @@
-from pythonrouge.pythonrouge import Pythonrouge
+#from pythonrouge.pythonrouge import Pythonrouge
 import rouge_not_a_wrapper as rouge_quick
 import pdb
 
+"""
 def rouge_scores(summ, ref):
     '''
     summ: summary that need to be calculated, a list of sentences
@@ -24,6 +25,7 @@ def rouge_scores(summ, ref):
            scores['ROUGE-2-F'], scores['ROUGE-2-P'], scores['ROUGE-2-R'],\
            scores['ROUGE-L-F'], scores['ROUGE-L-P'], scores['ROUGE-L-R']
     '''
+"""
 
 def rouge_scores_quick(summ, ref, metric=['rouge-1', 'rouge-2', 'rouge-l']):
     '''

@@ -175,7 +175,7 @@ class SummarizationModel(object):
       prev_context_cap = self.prev_context_cap
     else:
       prev_coverage = self.coverage if hps.coverage else None
-      prev_coverage_cap = self.prev_coverage_cap if hps.coverage else None
+      prev_coverage_cap = self.coverage_cap if hps.coverage else None
       prev_context = self.context_vector
       prev_context_cap = self.context_vector_cap
     output, out_state, attn_dist, context_vector, coverage, attn_dist_cap, context_vector_cap, coverage_cap, p_gen = attention_decoder_one_step(\
@@ -816,28 +816,3 @@ def _summary_score_star(args):
   """Convert `f([1,2])` to `f(1,2)` call."""
   return _summary_score(*args)
 
-'''
-def _extract_loss(art_batch, abs_batch):
-  # Calculate n-grams copy
-  def get_ngrams(text, n):
-    n_grams = ngrams(text, n)
-    return [tf.squeeze(tf.stack(grams)) for grams in n_grams]  
-
-  extract_loss = tf.constant(0)
-  for i in range(FLAGS.batch_size):
-    article = tf.split(art_batch[i], num_or_size_splits=FLAGS.max_enc_steps, axis=0)
-    abstract = tf.split(abs_batch[i], num_or_size_splits=FLAGS.max_dec_steps, axis=0)
-    #pdb.set_trace()
-    for n in range(2, 11):
-      ngrams_art = get_ngrams(article, n)
-      ngrams_abs = get_ngrams(abstract, n)
-      ngrams_loss = tf.constant(0)
-      for g1 in ngrams_abs:
-          for g2 in ngrams_art:
-            is_equal = tf.equal(tf.reduce_sum(tf.to_float(g1) - tf.to_float(g2)), tf.constant(0.0))
-            ngrams_loss = tf.cond(is_equal, lambda: tf.add(ngrams_loss, tf.constant(1)), \
-                                            lambda: tf.identity(ngrams_loss))
-      extract_loss = tf.add(extract_loss, ngrams_loss / len(ngrams_abs) * n)
-
-  return extract_loss / FLAGS.batch_size
-'''
