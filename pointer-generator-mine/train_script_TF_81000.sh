@@ -5,7 +5,7 @@ EXP_NAME='CNNDM_TF_81000iter'
 MAX_ITER=10000
 
 # 1-10000
-python run_summarization.py --mode=train --data_path=$DATA_PATH --vocab_path=$VOCAB_PATH --log_root=log --exp_name=$EXP_NAME --max_enc_steps=50 --max_dec_steps=15 --max_train_iter=1000 
+python run_summarization.py --mode=train --data_path=$DATA_PATH --vocab_path=$VOCAB_PATH --log_root=log --exp_name=$EXP_NAME --max_enc_steps=50 --max_dec_steps=15 --max_train_iter=$MAX_ITER 
 # 10001-20000
 python run_summarization.py --mode=train --data_path=$DATA_PATH --vocab_path=$VOCAB_PATH --log_root=log --exp_name=$EXP_NAME --max_enc_steps=100 --max_dec_steps=25 --max_train_iter=$MAX_ITER 
 # 20001-30000
