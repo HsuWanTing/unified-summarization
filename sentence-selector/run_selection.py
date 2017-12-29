@@ -25,7 +25,7 @@ from collections import namedtuple
 from data import Vocab
 from batcher import Batcher
 from model import SentenceSelector
-from decode import BeamSearchDecoder
+from evaluate import SelectorEval
 import util
 import pdb
 
@@ -36,24 +36,35 @@ tf.app.flags.DEFINE_string('data_path', '', 'Path expression to tf.Example dataf
 tf.app.flags.DEFINE_string('vocab_path', '', 'Path expression to text vocabulary file.')
 
 # Important settings
-tf.app.flags.DEFINE_string('mode', 'train', 'must be one of train/eval/decode')
+tf.app.flags.DEFINE_string('mode', 'train', 'must be one of train/eval/eval_all')
+tf.app.flags.DEFINE_boolean('single_pass', False, '')
 
 # Where to save output
 tf.app.flags.DEFINE_integer('max_train_iter', 29000, 'max iterations to train')
-tf.app.flags.DEFINE_integer('save_model_every', 100, 'save the model every N iterations')
+tf.app.flags.DEFINE_integer('save_model_every', 10, 'save the model every N iterations')
 tf.app.flags.DEFINE_integer('model_max_to_keep', 3, 'save latest N models')
 tf.app.flags.DEFINE_string('log_root', '', 'Root directory for all logging.')
 tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be saved in a directory with this name, under log_root.')
+
+# evaluation settings
 tf.app.flags.DEFINE_string('decode_ckpt_path', '', 'checkpoint path for decoding')
+tf.app.flags.DEFINE_float('thres', 0.4, 'threshold of probabilities')
+tf.app.flags.DEFINE_integer('min_select_sent', 5, 'min sentences need to be selected')
+tf.app.flags.DEFINE_integer('max_select_sent', 20, 'max sentences to be selected')
+tf.app.flags.DEFINE_boolean('eval_rouge', False, 'whether to evaluate ROUGE scores')
+tf.app.flags.DEFINE_boolean('save_pkl', False, 'whether to save the results as pickle files')
+tf.app.flags.DEFINE_boolean('save_bin', True, 'whether to save the results as binary files')
+tf.app.flags.DEFINE_boolean('plot', True, 'whether to plot the precision/recall and recall/ratio curves')
 
 # Hyperparameters
+tf.app.flags.DEFINE_string('rnn_type', 'LSTM', 'LSTM/GRU')
 tf.app.flags.DEFINE_integer('hidden_dim', 200, 'dimension of RNN hidden states')
 tf.app.flags.DEFINE_integer('emb_dim', 128, 'dimension of word embeddings')
 tf.app.flags.DEFINE_integer('batch_size', 64, 'minibatch size')
-tf.app.flags.DEFINE_integer('max_art_len', 100, 'max timesteps of encoder (max source text tokens)')
-tf.app.flags.DEFINE_integer('max_sent_len', 50, 'max timesteps of decoder (max summary tokens)')
+tf.app.flags.DEFINE_integer('max_art_len', 100, 'max timesteps of word-level encoder')
+tf.app.flags.DEFINE_integer('max_sent_len', 50, 'max timesteps of sentence-level encoder')
 tf.app.flags.DEFINE_integer('vocab_size', 50000, 'Size of vocabulary. These will be read from the vocabulary file in order. If the vocabulary file contains fewer words than this number, or if this number is set to 0, will take all words in the vocabulary file.')
-tf.app.flags.DEFINE_float('lr', 0.15, 'learning rate')
+tf.app.flags.DEFINE_float('lr', 0.1, 'learning rate')
 tf.app.flags.DEFINE_float('adagrad_init_acc', 0.1, 'initial accumulator value for Adagrad')
 tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells random uniform inititalization')
 tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, used for initializing everything else')
@@ -85,7 +96,6 @@ def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, decay=0.
   summary_writer.add_summary(loss_sum, step)
   tf.logging.info('running_avg_loss: %f', running_avg_loss)
   return running_avg_loss
-
 
 def setup_training(model, batcher):
   """Does setup before starting training (run_training)"""
@@ -137,10 +147,22 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer):
       if not np.isfinite(loss):
         raise Exception("Loss is not finite. Stopping.")
 
-      # get the summaries and iteration number so we can write summaries to tensorboard
-      summaries = results['summaries'] # we will write these summaries to tensorboard using summary_writer
       train_step = results['global_step'] # we need this to update our running average loss
 
+      #calc_precision_recall(batch.original_articles_sents, batch.original_extract_sent_ids, results['probs'])
+      _, _, _, _, _, avg_p, avg_r, avg_a = util.get_batch_precision_recall(batch.original_articles_sents, batch.original_extract_sent_ids, results['probs'])
+      summary = tf.Summary()
+      summary.value.add(tag='SentSelector/avg_precision', simple_value=avg_p)
+      summary_writer.add_summary(summary, train_step)
+      summary = tf.Summary()
+      summary.value.add(tag='SentSelector/avg_recall', simple_value=avg_r)
+      summary_writer.add_summary(summary, train_step)
+      summary = tf.Summary()
+      summary.value.add(tag='SentSelector/avg_accuracy', simple_value=avg_a)
+      summary_writer.add_summary(summary, train_step)
+
+      # get the summaries and iteration number so we can write summaries to tensorboard
+      summaries = results['summaries'] # we will write these summaries to tensorboard using summary_writer
       summary_writer.add_summary(summaries, train_step) # write the summaries
       if train_step % 100 == 0: # flush the summary writer every so often
         summary_writer.flush()
@@ -177,7 +199,7 @@ def run_eval(model, batcher):
       if step == final_step:
         break
     
-    tf.logging.info('max_enc_steps: %d, max_dec_steps: %d', FLAGS.max_enc_steps, FLAGS.max_dec_steps)
+    #tf.logging.info('max_enc_steps: %d, max_dec_steps: %d', FLAGS.max_enc_steps, FLAGS.max_dec_steps)
     _ = util.load_ckpt(saver, sess) # load a new checkpoint
     batch = batcher.next_batch() # get the next batch
 
@@ -190,10 +212,22 @@ def run_eval(model, batcher):
     # print the loss and coverage loss to screen
     loss = results['loss']
     tf.logging.info('loss: %f', loss)
+    train_step = results['global_step']
+
+    #calc_precision_recall(batch.original_articles_sents, batch.original_extract_sent_ids, results['probs'])
+    _, _, _, _, _, avg_p, avg_r, avg_a = util.get_batch_precision_recall(batch.original_articles_sents, batch.original_extract_sent_ids, results['probs'])
+    summary = tf.Summary()
+    summary.value.add(tag='SentSelector/avg_precision', simple_value=avg_p)
+    summary_writer.add_summary(summary, train_step)
+    summary = tf.Summary()
+    summary.value.add(tag='SentSelector/avg_recall', simple_value=avg_r)
+    summary_writer.add_summary(summary, train_step)
+    summary = tf.Summary()
+    summary.value.add(tag='SentSelector/avg_accuracy', simple_value=avg_a)
+    summary_writer.add_summary(summary, train_step)
 
     # add summaries
     summaries = results['summaries']
-    train_step = results['global_step']
     summary_writer.add_summary(summaries, train_step)
 
     # calculate running avg loss
@@ -229,7 +263,7 @@ def main(unused_argv):
   vocab = Vocab(FLAGS.vocab_path, FLAGS.vocab_size) # create a vocabulary
 
   # Make a namedtuple hps, containing the values of the hyperparameters that the model needs
-  hparam_list = ['mode', 'lr', 'adagrad_init_acc', 'rand_unif_init_mag', 'trunc_norm_init_std', 'max_grad_norm', 'hidden_dim', 'emb_dim', 'batch_size', 'max_art_len', 'max_sent_len']
+  hparam_list = ['mode', 'rnn_type', 'lr', 'adagrad_init_acc', 'rand_unif_init_mag', 'trunc_norm_init_std', 'max_grad_norm', 'hidden_dim', 'emb_dim', 'batch_size', 'max_art_len', 'max_sent_len']
   hps_dict = {}
   for key,val in FLAGS.__flags.iteritems(): # for each flag
     if key in hparam_list: # if it's in the list
@@ -237,16 +271,22 @@ def main(unused_argv):
   hps = namedtuple("HParams", hps_dict.keys())(**hps_dict)
 
   # Create a batcher object that will create minibatches of data
-  batcher = Batcher(FLAGS.data_path, vocab, hps, single_pass=False)
+  if hps.mode == 'eval_all':
+    hps = hps._replace(batch_size=1)
+  batcher = Batcher(FLAGS.data_path, vocab, hps, single_pass=FLAGS.single_pass)
   tf.set_random_seed(111) # a seed value for randomness
 
   if hps.mode == 'train':
     print "creating model..."
-    model = SummarizationModel(hps, vocab)
+    model = SentenceSelector(hps, vocab)
     setup_training(model, batcher)
   elif hps.mode == 'eval':
-    model = SummarizationModel(hps, vocab)
+    model = SentenceSelector(hps, vocab)
     run_eval(model, batcher)
+  elif hps.mode == 'eval_all':
+    model = SentenceSelector(hps, vocab)
+    evaluator = SelectorEval(model, batcher, vocab)
+    evaluator.evaluate()
   else:
     raise ValueError("The 'mode' flag must be one of train/eval/decode")
 

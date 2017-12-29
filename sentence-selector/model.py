@@ -39,9 +39,10 @@ class SentenceSelector(object):
     hps = self._hps
     self._art_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_art_len, hps.max_sent_len], name='art_batch')
     self._art_lens = tf.placeholder(tf.int32, [hps.batch_size], name='art_lens')
-    self._sent_lens = tf.placeholder(tf.int32, [hps.batch_size*hps.max_art_len], name='sent_lens')
-    #self._art_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, None, None], name='enc_padding_mask')
-    self._target_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_art_len], name='target_batch')
+    self._sent_lens = tf.placeholder(tf.int32, [hps.batch_size, hps.max_art_len], name='sent_lens')
+    self._art_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len], name='art_padding_mask')
+    self._sent_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len, hps.max_sent_len], name='sent_padding_mask')
+    self._target_batch = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len], name='target_batch')
 
 
   def _make_feed_dict(self, batch, just_enc=False):
@@ -56,8 +57,9 @@ class SentenceSelector(object):
     feed_dict = {}
     feed_dict[self._art_batch] = batch.art_batch # (batch_size, max_art_len, max_sent_len)
     feed_dict[self._art_lens] = batch.art_lens   # (batch_size, )
-    feed_dict[self._sent_lens] = batch.sent_lens # (batch_size*max_art_len, ), article1_sents + article2_sents + ...
-    #feed_dict[self._art_padding_mask] = batch.art_padding_mask # (batch_size, max_art_len, max_sent_len)
+    feed_dict[self._sent_lens] = batch.sent_lens # (batch_size, max_art_len)
+    feed_dict[self._art_padding_mask] = batch.art_padding_mask # (batch_size, max_art_len)
+    feed_dict[self._sent_padding_mask] = batch.sent_padding_mask # (batch_size, max_art_lens, max_sent_len)
     feed_dict[self._target_batch] = batch.target_batch # (batch_size, max_art_len)
     return feed_dict
 
@@ -74,19 +76,27 @@ class SentenceSelector(object):
         A tensor of shape [batch_size, <=max_enc_steps, 2*hidden_dim]. It's 2*hidden_dim because it's the concatenation of the forwards and backwards states.
     """
     with tf.variable_scope(name):
-      cell_fw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
-      cell_bw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
+      if self._hps.rnn_type == 'LSTM':
+        cell_fw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
+        cell_bw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
+      elif self._hps.rnn_type == 'GRU':
+        cell_fw = tf.contrib.rnn.GRUCell(self._hps.hidden_dim)
+        cell_bw = tf.contrib.rnn.GRUCell(self._hps.hidden_dim)
       (encoder_outputs, (_, _)) = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
       encoder_outputs = tf.concat(axis=2, values=encoder_outputs) # concatenate the forwards and backwards states
     return encoder_outputs
 
 
   def _add_classifier(self, sent_feats, art_feats):
-    """a logistic layer makes a binary decision as to whether the sentence belongs to the summary"""
+    """a logistic layer makes a binary decision as to whether the sentence belongs to the summary
+       sent_feats: sentence representations, shape (batch_size, max_art_len of this batch, hidden_dim*2)
+       art_feats: article representations, shape (batch_size, hidden_dim*2)"""
     hidden_dim = self._hps.hidden_dim
     batch_size = self._hps.batch_size
+    #max_art_len = sent_feats.shape[1]
 
     with tf.variable_scope('classifier'):
+      """
       w_content = tf.get_variable('w_content', [hidden_dim * 2, 1], dtype=tf.float32, initializer=self.trunc_norm_init)
       w_salience = tf.get_variable('w_salience', [hidden_dim * 2, hidden_dim * 2], dtype=tf.float32, initializer=self.trunc_norm_init)
       w_novelty = tf.get_variable('w_novelty', [hidden_dim * 2, hidden_dim * 2], dtype=tf.float32, initializer=self.trunc_norm_init)
@@ -94,20 +104,30 @@ class SentenceSelector(object):
 
       # s is the dynamic representation of the summary at the j-th sentence
       s = tf.zeros([batch_size, hidden_dim * 2])
+      """
+      w_content = tf.get_variable('w_content', [hidden_dim, 1], dtype=tf.float32, initializer=self.trunc_norm_init)
+      w_salience = tf.get_variable('w_salience', [hidden_dim, hidden_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
+      w_novelty = tf.get_variable('w_novelty', [hidden_dim, hidden_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
+      bias = tf.get_variable('bias', [1], dtype=tf.float32, initializer=tf.zeros_initializer())
+
+      # s is the dynamic representation of the summary at the j-th sentence
+      s = tf.zeros([batch_size, hidden_dim])
 
       logits = [] # logits before the sigmoid layer
+      probs = []
 
       for i in range(self._hps.max_art_len):
-        content_feats = tf.matmul(sent_feats[:, i, :], w_content) # (batch_size, )
-        salience_feats = tf.reduce_sum(tf.matmul(sent_feats[:, i, :], w_salience) * art_feats, 1) # (batch_size, )
-        novelty_feats = tf.reduce_sum(tf.matmul(sent_feats[:, i, :], w_novelty) * tf.tanh(s), 1) # (batch_size, )
-        logit = content_feats + salience_feats - novelty_feats + bias
+        content_feats = tf.matmul(sent_feats[:, i, :], w_content) # (batch_size, 1)
+        salience_feats = tf.reduce_sum(tf.matmul(sent_feats[:, i, :], w_salience) * art_feats, 1, keep_dims=True) # (batch_size, 1)
+        novelty_feats = tf.reduce_sum(tf.matmul(sent_feats[:, i, :], w_novelty) * tf.tanh(s), 1, keep_dims=True) # (batch_size, 1)
+        logit = content_feats + salience_feats - novelty_feats + bias # (batch_size, 1)
         logits.append(logit)
 
-        p = tf.sigmoid(logit) # (batch_size, )
+        p = tf.sigmoid(logit) # (batch_size, 1)
+        probs.append(p)
         s += tf.multiply(sent_feats[:, i, :], p)
 
-      return tf.stack(logits, 1) # (batch_size, max_art_len)
+      return tf.concat(logits, 1), tf.concat(probs, 1)  # (batch_size, max_art_len)
     
 
   def _add_emb_vis(self, embedding_var):
@@ -148,29 +168,41 @@ class SentenceSelector(object):
       ########################################
       # Add word-level encoder to encode each sentence.
       sent_enc_inputs = tf.reshape(emb_batch, [-1, hps.max_sent_len, hps.emb_dim]) # (batch_size*max_art_len, max_sent_len, emb_dim)
-      sent_enc_outputs = self._add_encoder(sent_enc_inputs, self._sent_lens, name='sent_encoder') # (batch_size*max_art_len, max_sent_len, hidden_dim*2)
+      sent_lens = tf.reshape(self._sent_lens, [-1]) # (batch_size*max_art_len, )
+      sent_enc_outputs = self._add_encoder(sent_enc_inputs, sent_lens, name='sent_encoder') # (batch_size*max_art_len, max_sent_len, hidden_dim*2)
 
       # Add sentence-level encoder to produce sentence representations.
       # sentence-level encoder input: average-pooled, concatenated hidden states of the word-level bi-LSTM.
-      art_enc_inputs = tf.reduce_mean(sent_enc_outputs, axis=1) # (batch_size*max_art_len, hidden_dim*2)
+      sent_padding_mask = tf.reshape(self._sent_padding_mask, [-1, hps.max_sent_len, 1]) # (batch_size*max_art_len, max_sent_len, 1)
+      sent_lens_float = tf.reduce_sum(sent_padding_mask, axis=1)
+      self.sent_lens_float = tf.where(sent_lens_float > 0.0, sent_lens_float, tf.ones(sent_lens_float.get_shape().as_list()))
+      art_enc_inputs = tf.reduce_sum(sent_enc_outputs * sent_padding_mask, axis=1) / self.sent_lens_float # (batch_size*max_art_len, hidden_dim*2)
       art_enc_inputs = tf.reshape(art_enc_inputs, [hps.batch_size, -1, hps.hidden_dim*2]) # (batch_size, max_art_len, hidden_dim*2)
       art_enc_outputs = self._add_encoder(art_enc_inputs, self._art_lens, name='art_encoder') # (batch_size, max_art_len, hidden_dim*2)
 
       # Get each sentence representation and the document representation.
+      """
       sent_feats = tf.contrib.layers.fully_connected(art_enc_outputs, hps.hidden_dim*2, activation_fn=tf.tanh) # (batch_size, max_art_len, hidden_dim*2)
       art_feats = tf.reduce_mean(art_enc_outputs, axis=1) # (batch_size, hidden_dim*2)
       art_feats = tf.contrib.layers.fully_connected(art_feats, hps.hidden_dim*2, activation_fn=tf.tanh) # (batch_size, hidden_dim*2)
+      """
+      sent_feats = tf.contrib.layers.fully_connected(art_enc_outputs, hps.hidden_dim, activation_fn=tf.tanh) # (batch_size, max_art_len, hidden_dim)
+      art_padding_mask = tf.expand_dims(self._art_padding_mask, 2) # (batch_size, max_art_len, 1)
+      art_feats = tf.reduce_sum(art_enc_outputs * art_padding_mask, axis=1) / tf.reduce_sum(art_padding_mask, axis=1) # (batch_size, hidden_dim)
+      art_feats = tf.contrib.layers.fully_connected(art_feats, hps.hidden_dim, activation_fn=tf.tanh) # (batch_size, hidden_dim)
 
       ########################################
       # Add the classifier.                  #
       ########################################
-      logits = self._add_classifier(sent_feats, art_feats) # (batch_size, max_art_len)
+      logits, self.probs = self._add_classifier(sent_feats, art_feats) # (batch_size, max_art_len)
 
       ################################################
       # Calculate the loss                           #
       ################################################
       with tf.variable_scope('loss'):
-        self._loss = tf.sigmoid_cross_entropy_with_logits(logits=logits, labels=self._target_batch)
+        loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=self._target_batch) # (batch_size, max_art_len)
+        loss = tf.reduce_sum(loss * self._art_padding_mask, 1) / tf.reduce_sum(self._art_padding_mask, 1) # (batch_size,)
+        self._loss = tf.reduce_mean(loss)
         tf.summary.scalar('loss', self._loss)
 
 
@@ -213,27 +245,28 @@ class SentenceSelector(object):
        summaries, loss, global_step and (optionally) coverage loss."""
     hps = self._hps
     feed_dict = self._make_feed_dict(batch)
-    pdb.set_trace()
 
     to_return = {
         'train_op': self._train_op,
         'summaries': self._summaries,
         'loss': self._loss,
+        'probs': self.probs,
         'global_step': self.global_step,
     }
     return sess.run(to_return, feed_dict)
 
-  def run_eval_step(self, sess, batch):
+  def run_eval_step(self, sess, batch, probs_only=False):
     """Runs one evaluation iteration. Returns a dictionary containing summaries, 
        loss, global_step and (optionally) coverage loss."""
     hps = self._hps
     feed_dict = self._make_feed_dict(batch)
 
-    to_return = {
-        'summaries': self._summaries,
-        'loss': self._loss,
-        'global_step': self.global_step,
-    }
-    return sess.run(to_return, feed_dict)
+    to_return = {'probs': self.probs}
 
+    if not probs_only:
+      to_return['summaries'] = self._summaries
+      to_return['loss'] = self._loss
+      to_return['global_step'] = self.global_step
+
+    return sess.run(to_return, feed_dict)
 

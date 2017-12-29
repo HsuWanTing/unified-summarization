@@ -52,7 +52,7 @@ class Example(object):
 
     self.art_ids = []
     self.sent_lens = []
-    for sent in art_words:
+    for sent in article_sentences:
       sent = sent.split()
       if len(sent) > hps.max_sent_len:
         sent = sent[:hps.max_sent_len]
@@ -85,7 +85,7 @@ class Example(object):
     # Store the original strings
     self.original_article_sents = article_sentences
     self.original_extract_sent_ids = extract_sent_ids
-    self.original_abstract = abstract
+    #self.original_abstract = abstract
     self.original_abstract_sents = abstract_sentences
 
 
@@ -180,8 +180,8 @@ class Batch(object):
           Same as self.enc_batch, but in-article OOVs are represented by their temporary article OOV number.
     """
     # Determine the maximum length of the encoder input sequence in this batch
-    #max_enc_seq_len = max([ex.enc_len for ex in example_list])
-    max_enc_seq_len = hps.max_art_len
+    #self.max_art_len = max([ex.art_len for ex in example_list])
+    #max_enc_seq_len = hps.max_art_len
 
     # Pad the encoder input sequences up to the length of the longest sequence
     for ex in example_list:
@@ -191,17 +191,20 @@ class Batch(object):
     # Note: our enc_batch can have different length (second dimension) for each batch because we use dynamic_rnn for the encoder.
     self.art_batch = np.zeros((hps.batch_size, hps.max_art_len, hps.max_sent_len), dtype=np.int32)
     self.art_lens = np.zeros((hps.batch_size), dtype=np.int32)
-    self.sent_lens = []
-    #self.enc_padding_mask = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.float32)
+    self.sent_lens = np.zeros((hps.batch_size, hps.max_art_len), dtype=np.int32)
+    self.art_padding_mask = np.zeros((hps.batch_size, hps.max_art_len), dtype=np.float32)
+    self.sent_padding_mask = np.zeros((hps.batch_size, hps.max_art_len, hps.max_sent_len), dtype=np.float32)
 
     # Fill in the numpy arrays
     for i, ex in enumerate(example_list):
       self.art_batch[i, :, :] = np.array(ex.art_ids)
       self.art_lens[i] = ex.art_len
-      self.sent_lens += ex.sent_lens
-      #for j in xrange(ex.enc_len):
-      #  self.enc_padding_mask[i][j] = 1
-    self.sent_lens = np.array(self.sent_lens)
+      self.sent_lens[i, :] = np.array(ex.sent_lens)
+      for j in xrange(ex.art_len):
+        self.art_padding_mask[i][j] = 1.0
+      for j in xrange(hps.max_art_len):
+        for k in xrange(ex.sent_lens[j]):
+          self.sent_padding_mask[i][j][k] = 1.0
 
     '''
     # For pointer-generator mode, need to store some extra info
@@ -220,7 +223,8 @@ class Batch(object):
     self.target_batch = np.zeros((hps.batch_size, hps.max_art_len), dtype=np.float32)
     for i, ex in enumerate(example_list):
        for idx in ex.extract_sent_ids:
-         self.target_batch[i][idx] = 1.0
+         if idx < hps.max_art_len:
+           self.target_batch[i][idx] = 1.0
 
   def init_decoder_seq(self, example_list, hps):
     """Initializes the following:
@@ -252,7 +256,7 @@ class Batch(object):
     """Store the original article and abstract strings in the Batch object"""
     self.original_articles_sents = [ex.original_article_sents for ex in example_list] # list of lists
     self.original_extract_sent_ids = [ex.original_extract_sent_ids for ex in example_list]
-    self.original_abstracts = [ex.original_abstract for ex in example_list] # list of lists
+    #self.original_abstracts = [ex.original_abstract for ex in example_list] # list of lists
     self.original_abstracts_sents = [ex.original_abstract_sents for ex in example_list] # list of list of lists
 
 
@@ -363,7 +367,7 @@ class Batcher(object):
         inputs = []
         for _ in xrange(self._hps.batch_size * self._bucketing_cache_size):
           inputs.append(self._example_queue.get())
-        inputs = sorted(inputs, key=lambda inp: inp.enc_len) # sort by length of encoder sequence
+        #inputs = sorted(inputs, key=lambda inp: inp.enc_len) # sort by length of encoder sequence
 
         # Group the sorted Examples into batches, optionally shuffle the batches, and place in the batch queue.
         batches = []
