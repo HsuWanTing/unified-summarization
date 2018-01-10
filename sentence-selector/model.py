@@ -86,6 +86,52 @@ class SentenceSelector(object):
       encoder_outputs = tf.concat(axis=2, values=encoder_outputs) # concatenate the forwards and backwards states
     return encoder_outputs
 
+  def _cnn_encoder(self, input_emb, name='cnn_encoder', reuse=False):
+    hps = self._hps
+    hidden_dim = hps.hidden_dim
+    text_len = hps.max_sent_len
+    random_uniform_init = tf.random_uniform_initializer(minval=-0.1, maxval=0.1)
+
+    with tf.variable_scope(name):
+      if reuse:
+        tf.get_variable_scope().reuse_variables()
+
+      input_emb_expanded = tf.expand_dims(input_emb, -1)  # (batch_size, seq_len, hidden_dim, 1)
+
+      # Create a convolution + maxpool layer for each filter size
+      pooled_outputs = []
+
+      for filter_size, num_filter in zip(hps.filter_sizes, hps.num_filters):
+        with tf.variable_scope("conv-maxpool-%s" % filter_size):
+          # Convolution Layer
+          filter_shape = [filter_size, hidden_dim, 1, num_filter]
+          W = tf.get_variable("W", filter_shape, "float32", random_uniform_init)
+          b = tf.get_variable("b", [num_filter], "float32", random_uniform_init)
+          conv = tf.nn.conv2d(
+                    input_emb_expanded,
+                    W,
+                    strides=[1, 1, 1, 1],
+                    padding="VALID",
+                    name="conv")
+          # Apply nonlinearity
+          h = tf.nn.relu(tf.nn.bias_add(conv, b), name="relu")
+          # Maxpooling over the outputs
+          pooled = tf.nn.max_pool(
+                    h,
+                    ksize=[1, text_len - filter_size + 1, 1, 1],
+                    strides=[1, 1, 1, 1],
+                    padding='VALID',
+                    name="pool")
+          pooled_outputs.append(pooled)
+      h_pool = tf.concat(pooled_outputs, 3)      # B,1,1,total filters
+      h_pool_flat = tf.reshape(h_pool, [-1, hps.num_filters_total])        # b, total filters
+
+      # Add highway
+      with tf.variable_scope("highway"):
+        h_highway = highway(h_pool_flat, h_pool_flat.get_shape()[1], 1, 0)
+
+    return h_highway
+
 
   def _add_classifier(self, sent_feats, art_feats):
     """a logistic layer makes a binary decision as to whether the sentence belongs to the summary
@@ -200,10 +246,18 @@ class SentenceSelector(object):
       # Calculate the loss                           #
       ################################################
       with tf.variable_scope('loss'):
-        loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=self._target_batch) # (batch_size, max_art_len)
-        loss = tf.reduce_sum(loss * self._art_padding_mask, 1) / tf.reduce_sum(self._art_padding_mask, 1) # (batch_size,)
+        if hps.loss == 'CE':
+          losses = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=self._target_batch) # (batch_size, max_art_len)
+        elif hps.loss == 'FL':
+          losses = self._focal_loss(self.probs, self._target_batch, hps.gamma)
+        loss = tf.reduce_sum(losses * self._art_padding_mask, 1) / tf.reduce_sum(self._art_padding_mask, 1) # (batch_size,)
         self._loss = tf.reduce_mean(loss)
         tf.summary.scalar('loss', self._loss)
+
+  def _focal_loss(self, probs, targets, gamma=2.0):
+    class_probs = tf.where(tf.equal(targets, 1), probs, 1.0 - probs) # (batch_size, max_art_len)
+    losses = -tf.pow(1. - class_probs, gamma) * tf.log(class_probs + 1e-8) # (batch_size, max_art_len)
+    return losses
 
 
   def _add_train_op(self):

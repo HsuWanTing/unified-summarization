@@ -47,6 +47,8 @@ tf.app.flags.DEFINE_string('log_root', '', 'Root directory for all logging.')
 tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be saved in a directory with this name, under log_root.')
 
 # evaluation settings
+tf.app.flags.DEFINE_boolean('load_best_val_model', False, '')
+tf.app.flags.DEFINE_boolean('load_best_test_model', False, '')
 tf.app.flags.DEFINE_string('decode_ckpt_path', '', 'checkpoint path for decoding')
 tf.app.flags.DEFINE_float('thres', 0.4, 'threshold of probabilities')
 tf.app.flags.DEFINE_integer('min_select_sent', 5, 'min sentences need to be selected')
@@ -56,8 +58,12 @@ tf.app.flags.DEFINE_boolean('save_pkl', False, 'whether to save the results as p
 tf.app.flags.DEFINE_boolean('save_bin', True, 'whether to save the results as binary files')
 tf.app.flags.DEFINE_boolean('plot', True, 'whether to plot the precision/recall and recall/ratio curves')
 
+# loss
+tf.app.flags.DEFINE_string('loss', 'CE', 'CE/FL (cross entropy/focal loss)')
+tf.app.flags.DEFINE_float('gamma', 2.0, 'gamma used in focal loss')
+
 # Hyperparameters
-tf.app.flags.DEFINE_string('rnn_type', 'LSTM', 'LSTM/GRU')
+tf.app.flags.DEFINE_string('rnn_type', 'GRU', 'LSTM/GRU')
 tf.app.flags.DEFINE_integer('hidden_dim', 200, 'dimension of RNN hidden states')
 tf.app.flags.DEFINE_integer('emb_dim', 128, 'dimension of word embeddings')
 tf.app.flags.DEFINE_integer('batch_size', 64, 'minibatch size')
@@ -91,7 +97,7 @@ def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, decay=0.
     running_avg_loss = running_avg_loss * decay + (1 - decay) * loss
   running_avg_loss = min(running_avg_loss, 12)  # clip
   loss_sum = tf.Summary()
-  tag_name = 'running_avg_loss/decay=%f' % (decay)
+  tag_name = 'running_avg_ratio/decay=%f' % (decay)
   loss_sum.value.add(tag=tag_name, simple_value=running_avg_loss)
   summary_writer.add_summary(loss_sum, step)
   tf.logging.info('running_avg_loss: %f', running_avg_loss)
@@ -105,11 +111,16 @@ def setup_training(model, batcher):
   default_device = tf.device('/gpu:0')
   with default_device:
     model.build_graph() # build the graph
-    saver = tf.train.Saver(max_to_keep=FLAGS.model_max_to_keep) # only keep 1 checkpoint at a time
-
+    params = tf.global_variables()
+    vars_to_save = [param for param in params if "Adagrad" not in param.name]
+    uninitialized_vars = [param for param in params if "Adagrad" in param.name]
+    saver = tf.train.Saver(vars_to_save, max_to_keep=FLAGS.model_max_to_keep) # only keep 1 checkpoint at a time
+    local_init_op = tf.variables_initializer(uninitialized_vars)
+  
   sv = tf.train.Supervisor(logdir=train_dir,
                      is_chief=True,
                      saver=saver,
+                     local_init_op=local_init_op,
                      summary_op=None,
                      save_summaries_secs=60, # save summaries for tensorboard every 60 secs
                      save_model_secs=0, # checkpoint every 60 secs
@@ -149,7 +160,13 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer):
 
       train_step = results['global_step'] # we need this to update our running average loss
 
-      #calc_precision_recall(batch.original_articles_sents, batch.original_extract_sent_ids, results['probs'])
+      recall, ratio, _ = util.get_batch_ratio(batch.original_articles_sents, batch.original_extract_sent_ids, results['probs'], target_recall=0.9)
+      if recall < 0.89 or recall > 0.91:
+        ratio = 1.0
+      summary = tf.Summary()
+      summary.value.add(tag='SentSelector/select_ratio/recall=0.9', simple_value=ratio)
+      summary_writer.add_summary(summary, train_step)
+      '''
       _, _, _, _, _, avg_p, avg_r, avg_a = util.get_batch_precision_recall(batch.original_articles_sents, batch.original_extract_sent_ids, results['probs'])
       summary = tf.Summary()
       summary.value.add(tag='SentSelector/avg_precision', simple_value=avg_p)
@@ -160,7 +177,7 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer):
       summary = tf.Summary()
       summary.value.add(tag='SentSelector/avg_accuracy', simple_value=avg_a)
       summary_writer.add_summary(summary, train_step)
-
+      '''
       # get the summaries and iteration number so we can write summaries to tensorboard
       summaries = results['summaries'] # we will write these summaries to tensorboard using summary_writer
       summary_writer.add_summary(summaries, train_step) # write the summaries
@@ -214,7 +231,13 @@ def run_eval(model, batcher):
     tf.logging.info('loss: %f', loss)
     train_step = results['global_step']
 
-    #calc_precision_recall(batch.original_articles_sents, batch.original_extract_sent_ids, results['probs'])
+    recall, ratio, _ = util.get_batch_ratio(batch.original_articles_sents, batch.original_extract_sent_ids, results['probs'], target_recall=0.9)
+    if recall < 0.89 or recall > 0.91:
+      ratio = 1.0
+    summary = tf.Summary()
+    summary.value.add(tag='SentSelector/select_ratio/recall=0.9', simple_value=ratio)
+    summary_writer.add_summary(summary, train_step)
+    '''
     _, _, _, _, _, avg_p, avg_r, avg_a = util.get_batch_precision_recall(batch.original_articles_sents, batch.original_extract_sent_ids, results['probs'])
     summary = tf.Summary()
     summary.value.add(tag='SentSelector/avg_precision', simple_value=avg_p)
@@ -225,13 +248,14 @@ def run_eval(model, batcher):
     summary = tf.Summary()
     summary.value.add(tag='SentSelector/avg_accuracy', simple_value=avg_a)
     summary_writer.add_summary(summary, train_step)
-
+    '''
     # add summaries
     summaries = results['summaries']
     summary_writer.add_summary(summaries, train_step)
 
     # calculate running avg loss
-    running_avg_loss = calc_running_avg_loss(np.asscalar(loss), running_avg_loss, summary_writer, train_step)
+    #running_avg_loss = calc_running_avg_loss(np.asscalar(loss), running_avg_loss, summary_writer, train_step)
+    running_avg_loss = calc_running_avg_loss(ratio, running_avg_loss, summary_writer, train_step)
 
     # If running_avg_loss is best so far, save this checkpoint (early stopping).
     # These checkpoints will appear as bestmodel-<iteration_number> in the eval dir
@@ -263,7 +287,7 @@ def main(unused_argv):
   vocab = Vocab(FLAGS.vocab_path, FLAGS.vocab_size) # create a vocabulary
 
   # Make a namedtuple hps, containing the values of the hyperparameters that the model needs
-  hparam_list = ['mode', 'rnn_type', 'lr', 'adagrad_init_acc', 'rand_unif_init_mag', 'trunc_norm_init_std', 'max_grad_norm', 'hidden_dim', 'emb_dim', 'batch_size', 'max_art_len', 'max_sent_len']
+  hparam_list = ['mode', 'rnn_type', 'loss', 'gamma', 'lr', 'adagrad_init_acc', 'rand_unif_init_mag', 'trunc_norm_init_std', 'max_grad_norm', 'hidden_dim', 'emb_dim', 'batch_size', 'max_art_len', 'max_sent_len']
   hps_dict = {}
   for key,val in FLAGS.__flags.iteritems(): # for each flag
     if key in hparam_list: # if it's in the list

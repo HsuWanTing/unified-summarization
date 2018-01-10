@@ -29,19 +29,20 @@ def get_config():
   config.gpu_options.allow_growth=True
   return config
 
-def load_ckpt(saver, sess, ckpt_path=None):
+def load_ckpt(saver, sess, ckpt_dir='train', ckpt_path=None):
   """Load checkpoint from the train directory and restore it to saver and sess, waiting 10 secs in the case of failure. Also returns checkpoint name."""
+  ckpt_dir = os.path.join(FLAGS.log_root, ckpt_dir)
   while True:
-    train_dir = os.path.join(FLAGS.log_root, "train")
     try:
       if not ckpt_path:
-        ckpt_state = tf.train.get_checkpoint_state(train_dir)
+        latest_filename = "checkpoint_best" if "eval" in ckpt_dir else None
+        ckpt_state = tf.train.get_checkpoint_state(ckpt_dir, latest_filename=latest_filename)
         ckpt_path = ckpt_state.model_checkpoint_path
       tf.logging.info('Loading checkpoint %s', ckpt_path)
       saver.restore(sess, ckpt_path)
       return ckpt_path
     except:
-      tf.logging.info("Failed to load checkpoint from %s. Sleeping for %i secs...", train_dir, 10)
+      tf.logging.info("Failed to load checkpoint from %s. Sleeping for %i secs...", ckpt_dir, 10)
       time.sleep(10)
 
 
@@ -82,7 +83,7 @@ def get_select_accuracy_one_thres(article_sents, probs, gt_selected_ids, thres, 
   accuracy = float(len(TP) + len(TN)) / art_sent_num
 
   if method == 'prob':
-    ratio = float(select_num) / len(article_sents) # ratio of selected sentences and article
+    ratio = float(select_num) / art_sent_num # ratio of selected sentences and article
   elif method == 'ratio':
     ratio = thres
 
@@ -159,3 +160,41 @@ def get_batch_precision_recall(batch_article_sents, batch_gt_ids, batch_probs, s
     tf.logging.info('avg accuracy: %f', avg_accs)
 
   return sent_nums, precisions, recalls, accuracys, ratios, avg_ps, avg_rs, avg_accs
+
+def get_batch_ratio(batch_article_sents, batch_gt_ids, batch_probs, target_recall=0.9, method='prob', tf_print=True):
+  batch_size = len(batch_article_sents)
+  max_recall = target_recall + 0.01
+  min_recall = target_recall - 0.01
+
+  thres = 0.1
+  min_thres = 0.0
+  max_thres = 1.0
+  recall = 0.0
+  count = 0
+  while (recall < min_recall or recall > max_recall) and count < 200:
+    recalls = []
+    ratios = []
+    for i in range(batch_size):
+      _, _, _, recall, _, ratio = get_select_accuracy_one_thres(batch_article_sents[i], batch_probs[i], \
+                                                    batch_gt_ids[i], thres, method=method)
+      recalls.append(recall)
+      ratios.append(ratio)
+
+    recall = sum(recalls) / float(batch_size)
+    ratio = sum(ratios) / float(batch_size)
+    if recall < min_recall:
+      max_thres = thres
+      thres -= ((thres - min_thres) / 2.0)
+    elif recall > max_recall:
+      min_thres = thres
+      thres += ((max_thres - thres) / 2.0)
+    count += 1
+    #print count
+
+  if tf_print:
+    tf.logging.info('recall: %f, ratio: %f, thres: %f', recall, ratio, thres)
+  return recall, ratio, thres
+
+
+
+

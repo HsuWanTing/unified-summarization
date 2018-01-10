@@ -37,7 +37,17 @@ class SelectorEval(object):
     self._sess = tf.Session(config=util.get_config())
 
     # Load an initial checkpoint to use for decoding
-    ckpt_path = util.load_ckpt(self._saver, self._sess, FLAGS.decode_ckpt_path)
+    if FLAGS.load_best_val_model:
+      tf.logging.info('Loading best val checkpoint')
+      ckpt_path = util.load_ckpt(self._saver, self._sess, ckpt_dir='eval_val')
+    elif FLAGS.load_best_test_model:
+      tf.logging.info('Loading best test checkpoint')
+      ckpt_path = util.load_ckpt(self._saver, self._sess, ckpt_dir='eval_test')
+    elif FLAGS.decode_ckpt_path:
+      ckpt_path = util.load_ckpt(self._saver, self._sess, ckpt_path=FLAGS.decode_ckpt_path)
+    else:
+      tf.logging.info('Loading best train checkpoint')
+      ckpt_path = util.load_ckpt(self._saver, self._sess)
 
     if FLAGS.single_pass:
       # Make a descriptive decode directory name
@@ -102,6 +112,7 @@ class SelectorEval(object):
       if batch is None: # finished decoding dataset in single_pass mode
         assert FLAGS.single_pass, "Dataset exhausted, but we are not in single_pass mode"
         tf.logging.info("Decoder has finished reading dataset for single_pass.")
+        results_log(self._precision, self._recall, self._accuracy, self._select_sent_num, self._ratio, self._decode_dir)
         if self._make_probs_pkl:
           with open(self._probs_pkl_path, 'wb') as output_file:
             pk.dump(probs_all, output_file)
@@ -117,7 +128,6 @@ class SelectorEval(object):
           rouge_results_dict = rouge_eval(self._rouge_ref_dir, self._rouge_dec_dir)
           rouge_log(rouge_results_dict, self._decode_dir)
 
-        results_log(self._precision, self._recall, self._accuracy, self._select_sent_num, self._ratio, self._decode_dir)
         t1 = time.time()
         tf.logging.info("evaluation time: %.3f min", (t1-t0)/60.0)
         return
