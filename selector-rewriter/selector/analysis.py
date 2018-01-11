@@ -7,6 +7,7 @@ import os, sys
 import itertools
 import util
 import time
+import rouge_not_a_wrapper as my_rouge
 import pdb
 from tqdm import tqdm
 
@@ -169,22 +170,40 @@ def plot_gt_scores(gt_ids, scores, result_dir):
   plt.clf()
   print '[Info] plot GT scores'
 
+def plot_rougeL_r(select_sents, reference_sents, result_dir):
+  Rouge_l_rs = []
+  for i in tqdm(range(len(select_sents))):
+    _, _, Rouge_l_r = my_rouge.rouge_l_summary_level(select_sents[i], reference_sents[i])
+    Rouge_l_rs.append(Rouge_l_r)
+
+  plt.figure(figsize=(9, 5))
+  plt.hist(np.array(Rouge_l_rs), bins=np.arange(0.0, 1.01, 0.05))
+  plt.xticks(np.arange(0.0, 1.01, 0.05))
+  plt.grid(True)
+  plt.xlabel("Rouge-L recall")
+  plt.ylabel("number of articles")
+  plt.title("Rouge-L Recall of Ground-Truth Selected Sentences")
+  plt.savefig(os.path.join(result_dir, 'gt_rougeL_r.png'))
+  plt.clf()
+
 
 def plot_all(result_dir):
   # load data
   if 'test' in result_dir:
-    scores_data = pk.load(open('/data/VSLab/cindy/Workspace/summarization/data/CNN_Dailymail/Rouge_scores/test_scores.pkl'))
+    scores_data = pk.load(open('/data/VSLab/cindy/Workspace/summarization/data/CNN_Dailymail/Rouge_scores/test_scores2.pkl'))
   elif 'val' in result_dir:
-    scores_data = pk.load(open('/data/VSLab/cindy/Workspace/summarization/data/CNN_Dailymail/Rouge_scores/val_scores.pkl'))
+    scores_data = pk.load(open('/data/VSLab/cindy/Workspace/summarization/data/CNN_Dailymail/Rouge_scores/val_scores2.pkl'))
   elif 'train' in result_dir:
-    scores_data = pk.load(open('/data/VSLab/cindy/Workspace/summarization/data/CNN_Dailymail/Rouge_scores/train_scores.pkl'))
+    scores_data = pk.load(open('/data/VSLab/cindy/Workspace/summarization/data/CNN_Dailymail/Rouge_scores/train_scores2.pkl'))
   scores = scores_data['rougeL']['r']
 
   data = pk.load(open(os.path.join(result_dir, 'probs.pkl')))
   gt_sent_num = [len(data['gt_ids'][i]) for i in data['article']]
   art_sent_num = [len(data['article'][i]) for i in data['article']]
-  articles = [data['article'][i] for i in data['article']]
+  articles = scores_data['article']
+  references = [data['reference'][i] for i in data['article']]
   gt_ids = [data['gt_ids'][i] for i in data['article']]
+  gt_sents = [[articles[i][idx] for idx in data['gt_ids'][i]] for i in data['article']]
   probs = [data['probs'][i] for i in data['article']]
   scores = [scores[i] for i in range(len(scores)) if len(scores_data['article'][i]) > 0]
 
@@ -207,7 +226,8 @@ def plot_all(result_dir):
     else:
       avg_art_num.append(0)
 
-  #plot_gt_scores(gt_ids, scores, result_dir)
+  #plot_rougeL_r(gt_sents, references, result_dir)
+  #plot_gt_scores(articles, gt_ids, scores, result_dir)
   plot_gt_sent_num(bins, hist[1:], result_dir)
   plot_art_sent_num(art_sent_num, result_dir)
   plot_relation(bins, avg_art_num, result_dir)
