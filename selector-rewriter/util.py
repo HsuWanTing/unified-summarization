@@ -166,12 +166,17 @@ def get_batch_ratio(batch_article_sents, batch_gt_ids, batch_probs, target_recal
   max_recall = target_recall + 0.01
   min_recall = target_recall - 0.01
 
-  thres = 0.1
+  # initial threshold
+  if method == 'prob':
+    thres = 0.1
+  elif method == 'ratio':
+    thres = 0.8
+
   min_thres = 0.0
   max_thres = 1.0
   recall = 0.0
   count = 0
-  while (recall < min_recall or recall > max_recall) and count < 200:
+  while (recall < min_recall or recall > max_recall) and count < 100:
     recalls = []
     ratios = []
     for i in range(batch_size):
@@ -182,12 +187,21 @@ def get_batch_ratio(batch_article_sents, batch_gt_ids, batch_probs, target_recal
 
     recall = sum(recalls) / float(batch_size)
     ratio = sum(ratios) / float(batch_size)
-    if recall < min_recall:
-      max_thres = thres
-      thres -= ((thres - min_thres) / 2.0)
-    elif recall > max_recall:
-      min_thres = thres
-      thres += ((max_thres - thres) / 2.0)
+
+    if method == 'prob':
+      if recall < min_recall:
+        max_thres = thres
+        thres -= ((thres - min_thres) / 2.0)
+      elif recall > max_recall:
+        min_thres = thres
+        thres += ((max_thres - thres) / 2.0)
+    elif method == 'ratio':
+      if recall > max_recall:
+        max_thres = thres
+        thres -= ((thres - min_thres) / 2.0)
+      elif recall < min_recall:
+        min_thres = thres
+        thres += ((max_thres - thres) / 2.0)
     count += 1
     #print count
 

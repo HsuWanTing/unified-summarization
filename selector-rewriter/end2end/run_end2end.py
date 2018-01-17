@@ -26,8 +26,7 @@ import pdb
 
 FLAGS = tf.app.flags.FLAGS
 
-
-def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, decay=0.99):
+def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, tag_name, decay=0.99):
   """Calculate the running average loss via exponential decay.
   This is used to implement early stopping w.r.t. a more smooth loss curve than the raw loss curve.
 
@@ -47,36 +46,11 @@ def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, decay=0.
     running_avg_loss = running_avg_loss * decay + (1 - decay) * loss
   running_avg_loss = min(running_avg_loss, 12)  # clip
   loss_sum = tf.Summary()
-  tag_name = 'running_avg_loss/decay=%f' % (decay)
-  loss_sum.value.add(tag=tag_name, simple_value=running_avg_loss)
+  tag_name2 = tag_name + '/decay=%f' % (decay)
+  loss_sum.value.add(tag=tag_name2, simple_value=running_avg_loss)
   summary_writer.add_summary(loss_sum, step)
-  tf.logging.info('running_avg_loss: %f', running_avg_loss)
+  tf.logging.info(tag_name + ': ' + str(running_avg_loss))
   return running_avg_loss
-
-
-def convert_to_pointer_model():
-  """Load non-pointer checkpoint, add initialized extra variables for pointer, and save as new checkpoint"""
-  tf.logging.info("converting non-pointer model to pointer model..")
-
-  # initialize an entire coverage model from scratch
-  sess = tf.Session(config=util.get_config())
-  print "initializing everything..."
-  sess.run(tf.global_variables_initializer())
-
-  # load all non-coverage weights from checkpoint
-  saver = tf.train.Saver([v for v in tf.global_variables() if "pgen" not in v.name and "Adagrad" not in v.name])
-  print "restoring non-pointer variables..."
-  curr_ckpt = util.load_ckpt(saver, sess)
-  print "restored."
-
-  # save this model and quit
-  new_fname = curr_ckpt + '-point-init'
-  print "saving model to %s..." % (new_fname)
-  new_saver = tf.train.Saver() # this one will save all variables that now exist
-  new_saver.save(sess, new_fname)
-  print "saved."
-  exit()
-
 
 def convert_to_coverage_model():
   """Load non-coverage checkpoint, add initialized extra variables for coverage, and save as new checkpoint"""
@@ -101,7 +75,6 @@ def convert_to_coverage_model():
   print "saved."
   exit()
 
-
 def setup_training(model, batcher):
   """Does setup before starting training (run_training)"""
   train_dir = os.path.join(FLAGS.log_root, "train")
@@ -113,32 +86,55 @@ def setup_training(model, batcher):
     if FLAGS.convert_to_coverage_model:
       assert FLAGS.coverage, "To convert your non-coverage model to a coverage model, run with convert_to_coverage_model=True and coverage=True"
       convert_to_coverage_model()
-    if FLAGS.convert_to_pointer_model:
-      assert FLAGS.pointer_gen, "To convert your non-pointer model to a pointer model, run with convert_to_pointer_model=True and pointer=True"
-      convert_to_pointer_model()
 
-    saver = tf.train.Saver(max_to_keep=FLAGS.model_max_to_keep) # only keep 1 checkpoint at a time
+    if FLAGS.pretrained_selector_path and FLAGS.pretrained_rewriter_path:
+      params = tf.global_variables()
+      selector_vars = [param for param in params if "SentSelector" in param.name and 'Adagrad' not in param.name]
+      rewriter_vars = [param for param in params if "seq2seq" in param.name and 'Adagrad' not in param.name]
+      uninitialized_vars = [param for param in params if param not in selector_vars and param not in rewriter_vars]
+      selector_saver = tf.train.Saver(selector_vars)
+      rewriter_saver = tf.train.Saver(rewriter_vars)
+      local_init_op = tf.variables_initializer(uninitialized_vars)
+      all_saver = tf.train.Saver(max_to_keep=FLAGS.model_max_to_keep)
+    else:
+      saver = tf.train.Saver(max_to_keep=FLAGS.model_max_to_keep)
 
-  sv = tf.train.Supervisor(logdir=train_dir,
-                     is_chief=True,
-                     saver=saver,
-                     summary_op=None,
-                     save_summaries_secs=60, # save summaries for tensorboard every 60 secs
-                     save_model_secs=0, # checkpoint every 60 secs
-                     global_step=model.global_step)
+  if FLAGS.pretrained_selector_path and FLAGS.pretrained_rewriter_path:
+    sv = tf.train.Supervisor(logdir=train_dir,
+                         is_chief=True,
+                         saver=None,
+                         local_init_op=local_init_op,
+                         summary_op=None,
+                         save_summaries_secs=60, # save summaries for tensorboard every 60 secs
+                         save_model_secs=0, # checkpoint every 60 secs
+                         global_step=model.global_step)
+  else:
+    sv = tf.train.Supervisor(logdir=train_dir,
+                         is_chief=True,
+                         saver=saver,
+                         summary_op=None,
+                         save_summaries_secs=60, # save summaries for tensorboard every 60 secs
+                         save_model_secs=0, # checkpoint every 60 secs
+                         global_step=model.global_step)
+  
   summary_writer = sv.summary_writer
   tf.logging.info("Preparing or waiting for session...")
   sess_context_manager = sv.prepare_or_wait_for_session(config=util.get_config())
   tf.logging.info("Created session.")
 
   try:
-    run_training(model, batcher, sess_context_manager, sv, summary_writer) # this is an infinite loop until interrupted
+    if FLAGS.pretrained_selector_path and FLAGS.pretrained_rewriter_path:
+      run_training(model, batcher, sess_context_manager, sv, summary_writer, \
+                   selector_saver, rewriter_saver, all_saver) # this is an infinite loop until interrupted
+    else:
+      run_training(model, batcher, sess_context_manager, sv, summary_writer) # this is an infinite loop until interrupted
   except KeyboardInterrupt:
     tf.logging.info("Caught keyboard interrupt on worker. Stopping supervisor...")
     sv.stop()
 
 
-def run_training(model, batcher, sess_context_manager, sv, summary_writer):
+def run_training(model, batcher, sess_context_manager, sv, summary_writer, \
+                 selector_saver=None, rewriter_saver=None, all_saver=None):
   """Repeatedly runs training iterations, logging loss to screen and writing summaries"""
   tf.logging.info("starting run_training")
   if FLAGS.coverage:
@@ -147,6 +143,13 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer):
     ckpt_path = os.path.join(FLAGS.log_root, "train", "model.ckpt")
 
   with sess_context_manager as sess:
+    if FLAGS.pretrained_selector_path and FLAGS.pretrained_rewriter_path:
+      tf.logging.info('Loading selector model')
+      _ = util.load_ckpt(selector_saver, sess, ckpt_path=FLAGS.pretrained_selector_path)
+      tf.logging.info('Loading target model')
+      _ = util.load_ckpt(rewriter_saver, sess, ckpt_path=FLAGS.pretrained_rewriter_path)
+
+
     for _ in range(FLAGS.max_train_iter): # repeats until interrupted
       batch = batcher.next_batch()
 
@@ -162,22 +165,32 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer):
       if not np.isfinite(loss):
         raise Exception("Loss is not finite. Stopping.")
 
+      train_step = results['global_step'] # we need this to update our running average loss
+
       if FLAGS.pointer_gen:
         tf.logging.info("pgen_avg: %f", results['p_gen_avg'])
 
       if FLAGS.coverage:
         tf.logging.info("coverage_loss: %f", results['coverage_loss']) # print the coverage loss to screen
 
+      recall, ratio, _ = util.get_batch_ratio(batch.original_articles_sents, batch.original_extracts_ids, results['probs'], target_recall=0.9)
+      if recall < 0.89 or recall > 0.91:
+        ratio = 1.0
+      summary = tf.Summary()
+      summary.value.add(tag='SentSelector/select_ratio/recall=0.9', simple_value=ratio)
+      summary_writer.add_summary(summary, train_step)
+
       # get the summaries and iteration number so we can write summaries to tensorboard
       summaries = results['summaries'] # we will write these summaries to tensorboard using summary_writer
-      train_step = results['global_step'] # we need this to update our running average loss
-
       summary_writer.add_summary(summaries, train_step) # write the summaries
       if train_step % 100 == 0: # flush the summary writer every so often
         summary_writer.flush()
 
       if train_step % FLAGS.save_model_every == 0:
-        sv.saver.save(sess, ckpt_path, global_step=train_step)
+        if FLAGS.pretrained_selector_path and FLAGS.pretrained_rewriter_path:
+          all_saver.save(sess, ckpt_path, global_step=train_step)
+        else:
+          sv.saver.save(sess, ckpt_path, global_step=train_step)
 
       print 'Step: ', train_step
 
@@ -193,6 +206,7 @@ def run_eval(model, batcher):
   bestmodel_save_path = os.path.join(eval_dir, 'bestmodel') # this is where checkpoints of best models are saved
   summary_writer = tf.summary.FileWriter(eval_dir)
   running_avg_loss = 0 # the eval job keeps a smoother, running average loss to tell it when to implement early stopping
+  running_avg_ratio = 0 # the eval job keeps a smoother, running average loss to tell it when to implement early stopping
   best_loss = None  # will hold the best loss achieved so far
   train_dir = os.path.join(FLAGS.log_root, "train")
   first_eval_step = True
@@ -221,6 +235,7 @@ def run_eval(model, batcher):
     # print the loss and coverage loss to screen
     loss = results['loss']
     tf.logging.info('loss: %f', loss)
+    train_step = results['global_step']
 
     if FLAGS.pointer_gen:
       tf.logging.info("pgen_avg: %f", results['p_gen_avg'])
@@ -228,13 +243,20 @@ def run_eval(model, batcher):
     if FLAGS.coverage:
       tf.logging.info("coverage_loss: %f", results['coverage_loss'])
 
+    recall, ratio, _ = util.get_batch_ratio(batch.original_articles_sents, batch.original_extracts_ids, results['probs'], target_recall=0.9)
+    if recall < 0.89 or recall > 0.91:
+      ratio = 1.0
+    summary = tf.Summary()
+    summary.value.add(tag='SentSelector/select_ratio/recall=0.9', simple_value=ratio)
+    summary_writer.add_summary(summary, train_step)
+
     # add summaries
     summaries = results['summaries']
-    train_step = results['global_step']
     summary_writer.add_summary(summaries, train_step)
 
     # calculate running avg loss
-    running_avg_loss = calc_running_avg_loss(np.asscalar(loss), running_avg_loss, summary_writer, train_step)
+    running_avg_loss = calc_running_avg_loss(np.asscalar(loss), running_avg_loss, summary_writer, train_step, 'running_avg_loss')
+    running_avg_ratio = calc_running_avg_loss(ratio, running_avg_ratio, summary_writer, train_step, 'running_avg_ratio')
 
     # If running_avg_loss is best so far, save this checkpoint (early stopping).
     # These checkpoints will appear as bestmodel-<iteration_number> in the eval dir

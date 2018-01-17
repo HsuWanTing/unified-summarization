@@ -1,21 +1,3 @@
-# Copyright 2016 The TensorFlow Authors. All Rights Reserved.
-# Modifications Copyright 2017 Abigail See
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
-
-"""This file contains code to run beam search decoding, including running ROUGE evaluation and producing JSON datafiles for the in-browser attention visualizer, which can be found here https://github.com/abisee/attn_vis"""
-
 import os
 import time
 import tensorflow as tf
@@ -33,8 +15,7 @@ FLAGS = tf.app.flags.FLAGS
 SECS_UNTIL_NEW_CKPT = 60  # max number of seconds before loading new checkpoint
 
 
-class BeamSearchDecoder(object):
-  """Beam search decoder."""
+class End2EndEvaluator(object):
 
   def __init__(self, model, batcher, vocab):
     """Initialize decoder.
@@ -67,7 +48,6 @@ class BeamSearchDecoder(object):
     if FLAGS.single_pass:
       # Make a descriptive decode directory name
       ckpt_name = "ckpt-" + ckpt_path.split('-')[-1] # this is something of the form "ckpt-123456"
-      #self._decode_dir = os.path.join(FLAGS.log_root, 'select_exp11', 'ckpt-54130', get_decode_dir_name(ckpt_name) + '_thres-0.4')
       self._decode_dir = os.path.join(FLAGS.log_root, get_decode_dir_name(ckpt_name))
       tf.logging.info('Save evaluation results to '+ self._decode_dir)
       if os.path.exists(self._decode_dir):
@@ -90,7 +70,7 @@ class BeamSearchDecoder(object):
       if not os.path.exists(self._result_dir): os.mkdir(self._result_dir)
 
 
-  def decode(self):
+  def evaluate(self):
     """Decode examples until data is exhausted (if FLAGS.single_pass) and return, or decode indefinitely, loading latest checkpoint at regular intervals"""
     t0 = time.time()
     counter = 0
@@ -109,17 +89,12 @@ class BeamSearchDecoder(object):
         assert FLAGS.single_pass, "Dataset exhausted, but we are not in single_pass mode"
         tf.logging.info("Decoder has finished reading dataset for single_pass.")
         tf.logging.info("Output has been saved in %s and %s. Starting ROUGE eval...", self._rouge_ref_dir, self._rouge_dec_dir)
-        results_dict = rouge_eval(self._rouge_ref_dir, self._rouge_dec_dir)
-        rouge_log(results_dict, self._decode_dir)
+        rouge_results_dict = rouge_eval(self._rouge_ref_dir, self._rouge_dec_dir)
+        rouge_log(rouge_results_dict, self._decode_dir)
         t1 = time.time()
         tf.logging.info("evaluation time: %.3f min", (t1-t0)/60.0)
         return
 
-      '''
-      if counter < 9695:
-        counter += 1
-        continue
-      '''
       original_article_sents = batch.original_articles_sents[0]  # list of strings
       original_abstract_sents = batch.original_abstracts_sents[0]  # list of strings
       original_selected_ids = batch.original_extracts_ids[0]
@@ -144,31 +119,16 @@ class BeamSearchDecoder(object):
       except ValueError:
         decoded_words = decoded_words
       decoded_output = ' '.join(decoded_words) # single string
-      decoded_sents = data.words2sents(decoded_words)
-
+      decoded_sents = data.words2sents(decoded_words)     
+ 
       if FLAGS.single_pass:
         self.write_for_rouge(original_abstract_sents, decoded_sents, counter) # write ref summary and decoded summary to file, to eval with pyrouge later
-        self.save_result(original_article_sents, original_abstract_sents, \
-                         original_selected_ids, decoded_sents, counter)
         #self.write_for_attnvis(article_withunks, abstract_withunks, decoded_words, best_hyp.attn_dists, \
         #                       best_hyp.p_gens, best_hyp.log_probs, counter)
+        self.save_result(original_article_sents, original_abstract_sents, \
+                         original_selected_ids, decoded_sents, counter)
         counter += 1 # this is how many examples we've decoded
-      else:
-        print_results(article_withunks, abstract_withunks, decoded_output) # log output to screen
-        self.write_for_attnvis(article_withunks, abstract_withunks, decoded_words, best_hyp.attn_dists, \
-                               best_hyp.p_gens, best_hyp.log_probs) # write info to .json file for visualization tool
-
-        counter += 1
-        if counter == 100:
-          break
-        '''
-        # Check if SECS_UNTIL_NEW_CKPT has elapsed; if so return so we can load a new checkpoint
-        t1 = time.time()
-        if t1-t0 > SECS_UNTIL_NEW_CKPT:
-          tf.logging.info('We\'ve been decoding with same checkpoint for %i seconds. Time to load new checkpoint', t1-t0)
-          _ = util.load_ckpt(self._saver, self._sess)
-          t0 = time.time()
-        '''
+ 
 
   def save_result(self, article_sents, reference_sents, gt_ids, decoded_sents, index):
     """save the result in pickle format"""

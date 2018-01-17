@@ -41,7 +41,8 @@ class SentenceSelector(object):
     self._sent_lens = tf.placeholder(tf.int32, [hps.batch_size, hps.max_art_len], name='sent_lens')
     self._art_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len], name='art_padding_mask')
     self._sent_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len, hps.max_sent_len], name='sent_padding_mask')
-    self._target_batch = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len], name='target_batch')
+    if hps.model == 'selector':
+      self._target_batch = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len], name='target_batch')
 
 
   def _make_feed_dict(self, batch, just_enc=False):
@@ -59,7 +60,8 @@ class SentenceSelector(object):
     feed_dict[self._sent_lens] = batch.sent_lens # (batch_size, max_art_len)
     feed_dict[self._art_padding_mask] = batch.art_padding_mask # (batch_size, max_art_len)
     feed_dict[self._sent_padding_mask] = batch.sent_padding_mask # (batch_size, max_art_lens, max_sent_len)
-    feed_dict[self._target_batch] = batch.target_batch # (batch_size, max_art_len)
+    if hps.model == 'selector':
+      feed_dict[self._target_batch] = batch.target_batch # (batch_size, max_art_len)
     return feed_dict
 
 
@@ -231,14 +233,15 @@ class SentenceSelector(object):
       ################################################
       # Calculate the loss                           #
       ################################################
-      with tf.variable_scope('loss'):
-        if hps.loss == 'CE':
-          losses = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=self._target_batch) # (batch_size, max_art_len)
-        elif hps.loss == 'FL':
-          losses = self._focal_loss(self.probs, self._target_batch, hps.gamma)
-        loss = tf.reduce_sum(losses * self._art_padding_mask, 1) / tf.reduce_sum(self._art_padding_mask, 1) # (batch_size,)
-        self._loss = tf.reduce_mean(loss)
-        tf.summary.scalar('loss', self._loss)
+      if hps.model == 'selector':
+        with tf.variable_scope('loss'):
+          if hps.loss == 'CE':
+            losses = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=self._target_batch) # (batch_size, max_art_len)
+          elif hps.loss == 'FL':
+            losses = self._focal_loss(self.probs, self._target_batch, hps.gamma)
+          loss = tf.reduce_sum(losses * self._art_padding_mask, 1) / tf.reduce_sum(self._art_padding_mask, 1) # (batch_size,)
+          self._loss = tf.reduce_mean(loss)
+          tf.summary.scalar('loss', self._loss)
 
   def _focal_loss(self, probs, targets, gamma=2.0):
     class_probs = tf.where(tf.equal(targets, 1), probs, 1.0 - probs) # (batch_size, max_art_len)

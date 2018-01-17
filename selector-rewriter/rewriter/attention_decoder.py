@@ -26,7 +26,8 @@ import pdb
 # Note: this function is based on tf.contrib.legacy_seq2seq_attention_decoder, which is now outdated.
 # In the future, it would make more sense to write variants on the attention mechanism using the new seq2seq library for tensorflow 1.0: https://www.tensorflow.org/api_guides/python/contrib.seq2seq#Attention
 def attention_decoder_one_step(decoder_input, prev_state, encoder_states, enc_padding_mask, cell, \
-                            prev_context=None, pointer_gen=True, use_coverage=False, prev_coverage=None):
+                            prev_context=None, pointer_gen=True, use_coverage=False, prev_coverage=None, \
+                            selector_probs=None, enc_sent_id_mask=None):
   """
   Args:
     decoder_input: 2D Tensors [batch_size x input_size].
@@ -53,6 +54,7 @@ def attention_decoder_one_step(decoder_input, prev_state, encoder_states, enc_pa
   """
   with variable_scope.variable_scope("attention_decoder") as scope:
     batch_size = encoder_states.get_shape()[0].value # if this line fails, it's because the batch size isn't defined
+    attn_len = tf.shape(encoder_states)[1]
     attn_size = encoder_states.get_shape()[2].value # if this line fails, it's because the attention length isn't defined
 
     # Reshape encoder_states (need to insert a dim)
@@ -99,9 +101,18 @@ def attention_decoder_one_step(decoder_input, prev_state, encoder_states, enc_pa
         def masked_attention(e):
           """Take softmax of e then apply enc_padding_mask and re-normalize"""
           attn_dist = nn_ops.softmax(e) # take softmax. shape (batch_size, attn_length)
+
+          # If end2end, multiply the selector sentence probability with attnention probability
+          if selector_probs is not None:
+            batch_nums = tf.expand_dims(tf.range(0, limit=batch_size), 1) # shape (batch_size, 1)
+            batch_nums_tile = tf.tile(batch_nums, [1, attn_len]) # shape (batch_size, attn_len)
+            indices = tf.stack( (batch_nums_tile, enc_sent_id_mask), axis=2) # shape (batch_size, attn_len, 2)
+            selector_probs_projected = tf.gather_nd(selector_probs, indices)
+            attn_dist = attn_dist * selector_probs_projected
+          
           attn_dist *= enc_padding_mask # apply mask
-          masked_sums = tf.reduce_sum(attn_dist, axis=1) # shape (batch_size)
-          return attn_dist / tf.reshape(masked_sums, [-1, 1]) # re-normalize
+          masked_sums = tf.reduce_sum(attn_dist, axis=1, keep_dims=True) # shape (batch_size)
+          return attn_dist / masked_sums # re-normalize
 
         if use_coverage and coverage is not None: # non-first step of coverage
           # Multiply coverage vector by w_c to get coverage_features.

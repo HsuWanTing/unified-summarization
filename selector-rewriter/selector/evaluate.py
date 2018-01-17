@@ -40,7 +40,7 @@ class SelectorEvaluator(object):
 
     if FLAGS.eval_gt_rouge: # no need to load model
       # Make a descriptive decode directory name
-      self._decode_dir = os.path.join(FLAGS.log_root, self._dataset + '_gt_select_method3')
+      self._decode_dir = os.path.join(FLAGS.log_root, 'gt_select_method3_' + self._dataset)
       tf.logging.info('Save evaluation results to '+ self._decode_dir)
       if os.path.exists(self._decode_dir):
         raise Exception("single_pass decode directory %s should not already exist" % self._decode_dir)
@@ -79,7 +79,6 @@ class SelectorEvaluator(object):
         decode_root_dir, decode_dir = get_decode_dir_name(ckpt_name, self._dataset)
         self._decode_root_dir = os.path.join(FLAGS.log_root, decode_root_dir)
         self._decode_dir = os.path.join(FLAGS.log_root, decode_root_dir, decode_dir)
-
         tf.logging.info('Save evaluation results to '+ self._decode_dir)
         if os.path.exists(self._decode_dir):
           raise Exception("single_pass decode directory %s should not already exist" % self._decode_dir)

@@ -43,6 +43,8 @@ class Rewriter(object):
     self._enc_batch = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_batch')
     self._enc_lens = tf.placeholder(tf.int32, [hps.batch_size], name='enc_lens')
     self._enc_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, None], name='enc_padding_mask')
+    if hps.model == 'end2end':
+      self._enc_sent_id_mask = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_sent_id_mask')
     if FLAGS.pointer_gen:
       self._enc_batch_extend_vocab = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_batch_extend_vocab')
       self._max_art_oovs = tf.placeholder(tf.int32, [], name='max_art_oovs')
@@ -70,6 +72,8 @@ class Rewriter(object):
     feed_dict[self._enc_batch] = batch.enc_batch
     feed_dict[self._enc_lens] = batch.enc_lens
     feed_dict[self._enc_padding_mask] = batch.enc_padding_mask
+    if hps.model == 'end2end':
+      feed_dict[self._enc_sent_id_mask] = batch.enc_sent_id_mask
     if FLAGS.pointer_gen:
       feed_dict[self._enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
       feed_dict[self._max_art_oovs] = batch.max_art_oovs
@@ -155,13 +159,22 @@ class Rewriter(object):
       prev_coverage = self.coverage if hps.coverage else None
       prev_context = self.context_vector
 
+    if hps.model == 'end2end':
+      selector_probs = self._selector_probs
+      enc_sent_id_mask = self._enc_sent_id_mask
+    else:
+      selector_probs = None
+      enc_sent_id_mask = None
+
     output, out_state, attn_dist, context_vector, p_gen, coverage = attention_decoder_one_step(\
                                                 inputs, self._dec_out_state, self._enc_states, \
                                                 self._enc_padding_mask, cell, \
                                                 prev_context=prev_context, \
                                                 pointer_gen=hps.pointer_gen, \
                                                 use_coverage=hps.coverage, \
-                                                prev_coverage=prev_coverage)
+                                                prev_coverage=prev_coverage, \
+                                                selector_probs=selector_probs, \
+                                                enc_sent_id_mask=enc_sent_id_mask)
 
     return output, out_state, attn_dist, context_vector, p_gen, coverage
 
@@ -233,6 +246,20 @@ class Rewriter(object):
 
   def _calc_final_dist_one_step(self, vocab_dist, attn_dist, p_gen):
     with tf.variable_scope('final_distribution'):
+      batch_nums = tf.range(0, limit=self._hps.batch_size) # shape (batch_size)
+      batch_nums = tf.expand_dims(batch_nums, 1) # shape (batch_size, 1)
+      attn_len = tf.shape(self._enc_batch_extend_vocab)[1] # number of states we attend over
+      batch_nums_tile = tf.tile(batch_nums, [1, attn_len]) # shape (batch_size, attn_len)
+
+      '''
+      # If end2end, multiply the selector sentence probability with attnention probability
+      if self._hps.model == 'end2end':
+        indices = tf.stack( (batch_nums_tile, self._enc_sent_id_mask), axis=2) # shape (batch_size, attn_len, 2)
+        selector_probs_projected = tf.gather_nd(self._selector_probs, indices)
+        attn_dist = attn_dist * selector_probs_projected
+        attn_dist = attn_dist / tf.reduce_sum(attn_dist, axis=1, keep_dims=True)  # normalize the attnetion distribution
+      '''
+
       # Multiply vocab dists by p_gen and attention dists by (1-p_gen)
       vocab_dist = p_gen * vocab_dist
       attn_dist = (1-p_gen) * attn_dist
@@ -246,11 +273,7 @@ class Rewriter(object):
       # This means that if a_i = 0.1 and the ith encoder word is w, and w has index 500 in the vocabulary, then we add 0.1 onto the 500th entry of the final distribution
       # This is done for each decoder timestep.
       # This is fiddly; we use tf.scatter_nd to do the projection
-      batch_nums = tf.range(0, limit=self._hps.batch_size) # shape (batch_size)
-      batch_nums = tf.expand_dims(batch_nums, 1) # shape (batch_size, 1)
-      attn_len = tf.shape(self._enc_batch_extend_vocab)[1] # number of states we attend over
-      batch_nums = tf.tile(batch_nums, [1, attn_len]) # shape (batch_size, attn_len)
-      indices = tf.stack( (batch_nums, self._enc_batch_extend_vocab), axis=2) # shape (batch_size, enc_t, 2)
+      indices = tf.stack( (batch_nums_tile, self._enc_batch_extend_vocab), axis=2) # shape (batch_size, enc_t, 2)
       shape = [self._hps.batch_size, extended_vsize]
       attn_dist_projected = tf.scatter_nd(indices, attn_dist, shape) # shape (batch_size, extended_vsize)
 
@@ -285,7 +308,7 @@ class Rewriter(object):
     embedding.metadata_path = vocab_metadata_path
     projector.visualize_embeddings(summary_writer, config)
 
-  def _add_seq2seq(self):
+  def _add_seq2seq(self, selector_probs=None):
     """Add the whole sequence-to-sequence model to the graph."""
     hps = self._hps
     vsize = self._vocab.size() # size of the vocabulary
@@ -317,6 +340,8 @@ class Rewriter(object):
       ########################################
       # Add the decoder.                     #
       ########################################
+      if hps.model == 'end2end': 
+        self._selector_probs = selector_probs
       vocab_scores, log_dists, self.attn_dists, self.p_gens = self._add_decoder(dec_inputs)
 
       ################################################
@@ -397,6 +422,8 @@ class Rewriter(object):
     t0 = time.time()
     self._add_placeholders()
     with tf.device("/gpu:0"):
+      #if self._hps.model == 'end2end':
+      #  self._selector_probs = selector_probs
       self._add_seq2seq()
     self.global_step = tf.Variable(0, name='global_step', trainable=False)
     if self._hps.mode == 'train':
@@ -453,7 +480,8 @@ class Rewriter(object):
       dec_in_state: A LSTMStateTuple of shape ([1,hidden_dim],[1,hidden_dim])
     """
     feed_dict = self._make_feed_dict(batch, just_enc=True) # feed the batch into the placeholders
-    (enc_states, dec_in_state, global_step) = sess.run([self._enc_states, self._dec_in_state, self.global_step], feed_dict) # run the encoder
+    #(enc_states, dec_in_state, global_step) = sess.run([self._enc_states, self._dec_in_state, self.global_step], feed_dict) # run the encoder
+    (enc_states, dec_in_state) = sess.run([self._enc_states, self._dec_in_state], feed_dict) # run the encoder
 
     # dec_in_state is LSTMStateTuple shape ([batch_size,hidden_dim],[batch_size,hidden_dim])
     # Given that the batch is a single example repeated, dec_in_state is identical across the batch so we just take the top row.
@@ -461,7 +489,8 @@ class Rewriter(object):
     return enc_states, dec_in_state
 
 
-  def decode_onestep(self, sess, batch, latest_tokens, enc_states, dec_init_states, prev_context, prev_coverage):
+  def decode_onestep(self, sess, batch, latest_tokens, enc_states, dec_init_states, \
+                     prev_context, prev_coverage, selector_probs=None):
     """For beam search decoding. Run the decoder for one step.
 
     Args:
@@ -498,6 +527,10 @@ class Rewriter(object):
         self._dec_batch: np.transpose(np.array([latest_tokens])),
         self.prev_context: np.stack(prev_context, axis=0)
     }
+
+    if self._hps.model == 'end2end':
+      feed[self._selector_probs] = selector_probs
+      feed[self._enc_sent_id_mask] = batch.enc_sent_id_mask
 
     to_return = {
       "ids": self._topk_ids,

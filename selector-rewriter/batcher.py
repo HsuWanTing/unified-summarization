@@ -50,13 +50,24 @@ class Example(object):
       start_decoding = vocab.word2id(data.START_DECODING)
       stop_decoding = vocab.word2id(data.STOP_DECODING)
 
-      # Process the extracted sentences
-      extract_sentences = [article_sentences[idx] for idx in extract_ids]
-      extract_words = ' '.join(extract_sentences).split()
-      if len(extract_words) > hps.max_enc_steps:
-        extract_words = extract_words[:hps.max_enc_steps]
-      self.enc_len = len(extract_words) # store the length after truncation but before padding
-      self.enc_input = [vocab.word2id(w) for w in extract_words] # list of word ids; OOVs are represented by the id for UNK token
+      if hps.mode == 'rewriter':
+        # Process the extracted sentences
+        extract_sentences = [article_sentences[idx] for idx in extract_ids]
+        enc_input_words = ' '.join(extract_sentences).split()
+      else:
+        # Process the article sentences
+        enc_input_words = ' '.join(article_sentences).split()
+        self.enc_input_sent_ids = []
+        for idx, sent in enumerate(article_sentences):
+          sent_words = sent.split()
+          for _ in range(len(sent_words)):
+            if len(self.enc_input_sent_ids) < hps.max_enc_steps:
+              self.enc_input_sent_ids.append(idx)
+      
+      if len(enc_input_words) > hps.max_enc_steps:
+        enc_input_words = enc_input_words[:hps.max_enc_steps]
+      self.enc_len = len(enc_input_words) # store the length after truncation but before padding
+      self.enc_input = [vocab.word2id(w) for w in enc_input_words] # list of word ids; OOVs are represented by the id for UNK token
 
       # Process the abstract
       abstract = ' '.join(abstract_sentences) # string
@@ -70,7 +81,7 @@ class Example(object):
       # If using pointer-generator mode, we need to store some extra info
       if hps.pointer_gen:
         # Store a version of the enc_input where in-article OOVs are represented by their temporary OOV id; also store the in-article OOVs words themselves
-        self.enc_input_extend_vocab, self.article_oovs = data.article2ids(extract_words, vocab)
+        self.enc_input_extend_vocab, self.article_oovs = data.article2ids(enc_input_words, vocab)
 
         # Get a verison of the reference summary where in-article OOVs are represented by their temporary article OOV id
         abs_ids_extend_vocab = data.abstract2ids(abstract_words, vocab, self.article_oovs)
@@ -133,6 +144,9 @@ class Example(object):
     if self.hps.pointer_gen:
       while len(self.enc_input_extend_vocab) < max_len:
         self.enc_input_extend_vocab.append(pad_id)
+    if self.hps.model == 'end2end':
+      while len(self.enc_input_sent_ids) < max_len:
+        self.enc_input_sent_ids.append(pad_id)
 
   def pad_article(self, max_art_len, max_sent_len, pad_id):
     """For selector, pad the article with pad_id up to max_art_len sentences 
@@ -200,11 +214,15 @@ class Batch(object):
     self.enc_batch = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
     self.enc_lens = np.zeros((hps.batch_size), dtype=np.int32)
     self.enc_padding_mask = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.float32)
+    if hps.model == 'end2end':
+      self.enc_sent_id_mask = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
 
     # Fill in the numpy arrays
     for i, ex in enumerate(example_list):
       self.enc_batch[i, :] = ex.enc_input[:]
       self.enc_lens[i] = ex.enc_len
+      if hps.model == 'end2end':
+        self.enc_sent_id_mask[i, :] = ex.enc_input_sent_ids[:]
       for j in xrange(ex.enc_len):
         self.enc_padding_mask[i][j] = 1
 
@@ -325,7 +343,7 @@ class Batcher(object):
     self._hps = hps
     self._single_pass = single_pass
     if hps.model == 'selector' and hps.eval_gt_rouge:
-      self.BATCH_QUEUE_MAX = 2000
+      self.BATCH_QUEUE_MAX = 20000
     else:
       self.BATCH_QUEUE_MAX = 100
 

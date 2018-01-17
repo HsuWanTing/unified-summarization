@@ -22,16 +22,21 @@ import os
 import tensorflow as tf
 import numpy as np
 from collections import namedtuple
+
 from selector.model import SentenceSelector
 from selector.evaluate import SelectorEvaluator
 import selector.run_selector as run_selector
+
 from rewriter.model import Rewriter
 from rewriter.decode import BeamSearchDecoder
 import rewriter.run_rewriter as run_rewriter
+
+from end2end.evaluate import End2EndEvaluator
+from end2end.model import SelectorRewriter
+import end2end.run_end2end as run_end2end
+
 from data import Vocab
 from batcher import Batcher
-import run_end2end
-import evaluate_end2end
 import util
 import pdb
 
@@ -55,6 +60,10 @@ tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be sa
 tf.app.flags.DEFINE_boolean('load_best_val_model', False, '')
 tf.app.flags.DEFINE_boolean('load_best_test_model', False, '')
 tf.app.flags.DEFINE_string('eval_ckpt_path', '', 'checkpoint path for evalall mode')
+
+# For end2end training, need to load pretrained model
+tf.app.flags.DEFINE_string('pretrained_selector_path', '', 'selector checkpoint path for end2end model')
+tf.app.flags.DEFINE_string('pretrained_rewriter_path', '', 'rewriter checkpoint path for end2end model')
 
 # Hyperparameters for both selector and rewriter
 tf.app.flags.DEFINE_integer('batch_size', 16, 'minibatch size')
@@ -179,17 +188,20 @@ def main(unused_argv):
       print "creating model..."
       select_model = SentenceSelector(hps, vocab)
       rewrite_model = Rewriter(hps, vocab)
-      run_end2end.setup_training(select_model, rewrite_model, batcher)
+      end2end_model = SelectorRewriter(hps, select_model, rewrite_model)
+      run_end2end.setup_training(end2end_model, batcher)
     elif hps.mode == 'eval':
       select_model = SentenceSelector(hps, vocab)
       rewrite_model = Rewriter(hps, vocab)
-      run_end2end.run_eval(select_model, rewrite_model, batcher)
+      end2end_model = SelectorRewriter(hps, select_model, rewrite_model)
+      run_end2end.run_eval(end2end_model, batcher)
     elif hps.mode == 'evalall':
       eval_model_hps = hps  # This will be the hyperparameters for the decoder model
       eval_model_hps = hps._replace(max_dec_steps=1) # The model is configured with max_dec_steps=1 because we only ever run one step of the decoder at a time (to do beam search). Note that the batcher is initialized with max_dec_steps equal to e.g. 100 because the batches need to contain the full summaries
-      select_model = selector.model.SentenceSelector(eval_model_hps, vocab)
-      rewrite_model = rewriter.model.Rewriter(eval_model_hps, vocab)
-      evaluator = evaluate_end2end.End2EndEvaluator(model, batcher, vocab)
+      select_model = SentenceSelector(eval_model_hps, vocab)
+      rewrite_model = Rewriter(eval_model_hps, vocab)
+      end2end_model = SelectorRewriter(hps, select_model, rewrite_model)
+      evaluator = End2EndEvaluator(end2end_model, batcher, vocab)
       evaluator.evaluate() # decode indefinitely (unless single_pass=True, in which case deocde the dataset exactly once)
 
 if __name__ == '__main__':
