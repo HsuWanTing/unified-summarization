@@ -191,8 +191,8 @@ def run_eval(model, batcher):
     running_avg_reward_argmax = 0 # the eval job keeps a smoother, running average loss to tell it when to implement early stopping
     best_reward_argmax = None  # will hold the best loss achieved so far
   else:
-    running_avg_loss = 0 # the eval job keeps a smoother, running average loss to tell it when to implement early stopping
-    best_loss = None  # will hold the best loss achieved so far
+    running_avg_ratio = 0 # the eval job keeps a smoother, running average loss to tell it when to implement early stopping
+    best_ratio = None  # will hold the best loss achieved so far
   
   train_dir = os.path.join(FLAGS.log_root, "train")
   first_eval_step = True
@@ -251,7 +251,7 @@ def run_eval(model, batcher):
       running_avg_reward_argmax = calc_running_avg_loss(results['argmax']['avg_reward'], running_avg_reward_argmax, summary_writer, train_step, 'SentSelector/running_avg_reward/argmax')
     else:
       #running_avg_loss = calc_running_avg_loss(np.asscalar(loss), running_avg_loss, summary_writer, train_step)
-      running_avg_loss = calc_running_avg_loss(ratio, running_avg_loss, summary_writer, train_step, 'running_avg_ratio')
+      running_avg_ratio = calc_running_avg_loss(ratio, running_avg_ratio, summary_writer, train_step, 'running_avg_ratio')
 
     # If running_avg_loss is best so far, save this checkpoint (early stopping).
     # These checkpoints will appear as bestmodel-<iteration_number> in the eval dir
@@ -261,10 +261,10 @@ def run_eval(model, batcher):
         saver.save(sess, bestmodel_save_path, global_step=train_step, latest_filename='checkpoint_best')
         best_reward_argmax = running_avg_reward_argmax
     else:
-      if best_loss is None or running_avg_loss < best_loss:
-        tf.logging.info('Found new best model with %.3f running_avg_ratio. Saving to %s', running_avg_loss, bestmodel_save_path)
+      if best_ratio is None or running_avg_ratio < best_ratio:
+        tf.logging.info('Found new best model with %.3f running_avg_ratio. Saving to %s', running_avg_ratio, bestmodel_save_path)
         saver.save(sess, bestmodel_save_path, global_step=train_step, latest_filename='checkpoint_best')
-        best_loss = running_avg_loss
+        best_ratio = running_avg_ratio
 
     # flush the summary writer every so often
     if train_step % 100 == 0:

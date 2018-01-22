@@ -42,11 +42,11 @@ class SentenceSelector(object):
     self._sent_lens = tf.placeholder(tf.int32, [hps.batch_size, hps.max_art_len], name='sent_lens')
     self._art_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len], name='art_padding_mask')
     self._sent_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len, hps.max_sent_len], name='sent_padding_mask')
-    if hps.loss != 'PG':
-      if hps.model == 'selector' or (hps.model == 'end2end' and hps.selector_loss_in_end2end):
+    if hps.model == 'selector' or (hps.model == 'end2end' and hps.selector_loss_in_end2end):
+      if hps.loss != 'PG':
         self._target_batch = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len], name='target_batch')
-    if hps.loss == 'PG':
-      self.rewards = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len], name='rewards')
+      else:
+        self.rewards = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len], name='rewards')
 
 
   def _make_feed_dict(self, batch, just_enc=False):
@@ -64,8 +64,8 @@ class SentenceSelector(object):
     feed_dict[self._sent_lens] = batch.sent_lens # (batch_size, max_art_len)
     feed_dict[self._art_padding_mask] = batch.art_padding_mask # (batch_size, max_art_len)
     feed_dict[self._sent_padding_mask] = batch.sent_padding_mask # (batch_size, max_art_lens, max_sent_len)
-    if hps.loss != 'PG':
-      if hps.model == 'selector' or (hps.model == 'end2end' and hps.selector_loss_in_end2end):
+    if hps.model == 'selector' or (hps.model == 'end2end' and hps.selector_loss_in_end2end):
+      if hps.loss != 'PG':
         feed_dict[self._target_batch] = batch.target_batch_selector # (batch_size, max_art_len)
     return feed_dict
 

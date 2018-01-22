@@ -122,7 +122,7 @@ class SelectorEvaluator(object):
     '''
     rouge_dir = './log/cnn_dailymail/decode_test_400maxenc_4beam_35mindec_100maxdec_ckpt-111000/'
     print('Start rouge eval. Dir: ', rouge_dir)
-    results_dict = rouge_eval(rouge_dir + 'reference', rouge_dir + 'decoded')
+    results_dict = rouge_eval(rouge_dir + 'reference', rouge_dir + 'decoded', 'ROUGE_results.txt')
     rouge_log(results_dict, rouge_dir)
     return
     '''

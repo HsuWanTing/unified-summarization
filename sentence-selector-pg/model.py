@@ -21,7 +21,6 @@ import sys
 import time
 import numpy as np
 import tensorflow as tf
-import data
 from tensorflow.contrib.tensorboard.plugins import projector
 import rouge_not_a_wrapper as my_rouge
 import pdb
@@ -43,8 +42,9 @@ class SentenceSelector(object):
     self._sent_lens = tf.placeholder(tf.int32, [hps.batch_size, hps.max_art_len], name='sent_lens')
     self._art_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len], name='art_padding_mask')
     self._sent_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len, hps.max_sent_len], name='sent_padding_mask')
-    self._target_batch = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len], name='target_batch')
-    if hps.loss == 'PG':
+    if hps.loss != 'PG':
+      self._target_batch = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len], name='target_batch')
+    else:
       self.rewards = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len], name='rewards')
 
 
@@ -63,7 +63,8 @@ class SentenceSelector(object):
     feed_dict[self._sent_lens] = batch.sent_lens # (batch_size, max_art_len)
     feed_dict[self._art_padding_mask] = batch.art_padding_mask # (batch_size, max_art_len)
     feed_dict[self._sent_padding_mask] = batch.sent_padding_mask # (batch_size, max_art_lens, max_sent_len)
-    feed_dict[self._target_batch] = batch.target_batch # (batch_size, max_art_len)
+    if hps.loss != 'PG':
+      feed_dict[self._target_batch] = batch.target_batch # (batch_size, max_art_len)
     return feed_dict
 
 
@@ -259,7 +260,6 @@ class SentenceSelector(object):
     losses = -tf.pow(1. - class_probs, gamma) * tf.log(class_probs + 1e-8) # (batch_size, max_art_len)
     return losses
 
-
   def _surrogate_loss(self, probs):
     hps = self._hps
     # produce not select probs and select probs
@@ -293,7 +293,7 @@ class SentenceSelector(object):
     # Take gradients of the trainable variables w.r.t. the loss function to minimize
     hps = self._hps
     tvars = tf.trainable_variables()
-    if hps.regu_ratio_wt > 0.0 or hps.regu_l2_wt > 0.0:
+    if hps.loss == 'PG' and (hps.regu_ratio_wt > 0.0 or hps.regu_l2_wt > 0.0):
       loss_to_minimize = self._total_loss
     else:
       loss_to_minimize = self._loss
@@ -329,7 +329,6 @@ class SentenceSelector(object):
     t1 = time.time()
     tf.logging.info('Time to build graph: %i seconds', t1 - t0)
 
-
   def _get_rewards(self, actions, batch):
     '''Get sampled actions and calculate reward for policy gradient training.'''
     hps = self._hps
@@ -363,7 +362,6 @@ class SentenceSelector(object):
                'avg_ratio': batch_avg_ratio,
                'avg_gt_recall': batch_avg_gt_recall}
     return results
-
 
   def run_train_step(self, sess, batch):
     """Runs one training iteration. Returns a dictionary containing train op, 

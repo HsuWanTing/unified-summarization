@@ -38,6 +38,7 @@ tf.app.flags.DEFINE_string('vocab_path', '', 'Path expression to text vocabulary
 # Important settings
 tf.app.flags.DEFINE_string('mode', 'train', 'must be one of train/eval/eval_all')
 tf.app.flags.DEFINE_boolean('single_pass', False, '')
+tf.app.flags.DEFINE_string('pretrained_ckpt_path', '', 'pretrained checkpoint path')
 
 # Where to save output
 tf.app.flags.DEFINE_integer('max_train_iter', 29000, 'max iterations to train')
@@ -86,7 +87,6 @@ def write_to_summary(value, tag_name, step, summary_writer):
   summary.value.add(tag=tag_name, simple_value=value)
   summary_writer.add_summary(summary, step)
 
-
 def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, tag_name, decay=0.99):
   """Calculate the running average loss via exponential decay.
   This is used to implement early stopping w.r.t. a more smooth loss curve than the raw loss curve.
@@ -122,37 +122,62 @@ def setup_training(model, batcher):
   with default_device:
     model.build_graph() # build the graph
     params = tf.global_variables()
-    vars_to_save = [param for param in params if "Adagrad" not in param.name]
-    uninitialized_vars = [param for param in params if "Adagrad" in param.name]
-    saver = tf.train.Saver(vars_to_save, max_to_keep=FLAGS.model_max_to_keep) # only keep 1 checkpoint at a time
-    local_init_op = tf.variables_initializer(uninitialized_vars)
-  
-  sv = tf.train.Supervisor(logdir=train_dir,
-                     is_chief=True,
-                     saver=saver,
-                     local_init_op=local_init_op,
-                     summary_op=None,
-                     save_summaries_secs=60, # save summaries for tensorboard every 60 secs
-                     save_model_secs=0, # checkpoint every 60 secs
-                     global_step=model.global_step)
+    if FLAGS.pretrained_ckpt_path: # cross entropy loss eval best model or train model
+      params = tf.global_variables()
+      # do not load global step, adagrad state and running avg reward
+      selector_vars = [param for param in params if "SentSelector" in param.name and 'Adagrad' not in param.name]
+      uninitialized_vars = [param for param in params if param not in selector_vars]
+      pretrained_saver = tf.train.Saver(selector_vars)
+      local_init_op = tf.variables_initializer(uninitialized_vars)
+      saver = tf.train.Saver(max_to_keep=FLAGS.model_max_to_keep)
+    else:
+      saver = tf.train.Saver(max_to_keep=FLAGS.model_max_to_keep)
+
+  if FLAGS.pretrained_ckpt_path:
+    sv = tf.train.Supervisor(logdir=train_dir,
+                         is_chief=True,
+                         saver=None,
+                         local_init_op=local_init_op,
+                         summary_op=None,
+                         save_summaries_secs=60, # save summaries for tensorboard every 60 secs
+                         save_model_secs=0, # checkpoint every 60 secs
+                         global_step=model.global_step)
+  else:
+    sv = tf.train.Supervisor(logdir=train_dir,
+                         is_chief=True,
+                         saver=saver,
+                         summary_op=None,
+                         save_summaries_secs=60, # save summaries for tensorboard every 60 secs
+                         save_model_secs=0, # checkpoint every 60 secs
+                         global_step=model.global_step)  
+
   summary_writer = sv.summary_writer
   tf.logging.info("Preparing or waiting for session...")
   sess_context_manager = sv.prepare_or_wait_for_session(config=util.get_config())
   tf.logging.info("Created session.")
 
   try:
-    run_training(model, batcher, sess_context_manager, sv, summary_writer) # this is an infinite loop until interrupted
+    if FLAGS.pretrained_ckpt_path:
+      run_training(model, batcher, sess_context_manager, sv, summary_writer, \
+                   pretrained_saver, saver) # this is an infinite loop until interrupted
+    else:
+      run_training(model, batcher, sess_context_manager, sv, summary_writer) # this is an infinite loop until interrupted
   except KeyboardInterrupt:
     tf.logging.info("Caught keyboard interrupt on worker. Stopping supervisor...")
     sv.stop()
 
 
-def run_training(model, batcher, sess_context_manager, sv, summary_writer):
+def run_training(model, batcher, sess_context_manager, sv, summary_writer,
+                 pretrained_saver=None, saver=None):
   """Repeatedly runs training iterations, logging loss to screen and writing summaries"""
   tf.logging.info("starting run_training")
   ckpt_path = os.path.join(FLAGS.log_root, "train", "model.ckpt")
 
   with sess_context_manager as sess:
+    if FLAGS.pretrained_ckpt_path:
+      tf.logging.info('Loading pretrained selector model')
+      _ = util.load_ckpt(pretrained_saver, sess, ckpt_path=FLAGS.pretrained_ckpt_path)
+
     for _ in range(FLAGS.max_train_iter): # repeats until interrupted
       batch = batcher.next_batch()
 
@@ -197,7 +222,10 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer):
         summary_writer.flush()
 
       if train_step % FLAGS.save_model_every == 0:
-        sv.saver.save(sess, ckpt_path, global_step=train_step)
+        if FLAGS.pretrained_ckpt_path:
+          saver.save(sess, ckpt_path, global_step=train_step)
+        else:
+          sv.saver.save(sess, ckpt_path, global_step=train_step)
 
       print 'Step: ', train_step
 
@@ -215,12 +243,12 @@ def run_eval(model, batcher):
 
   if FLAGS.loss == 'PG':
     running_avg_reward_sample = 0 # the eval job keeps a smoother
-    best_reward_sample = None  # will hold the best loss achieved so far
+    #best_reward_sample = None  # will hold the best loss achieved so far
     running_avg_reward_argmax = 0 # the eval job keeps a smoother, running average loss to tell it when to implement early stopping
     best_reward_argmax = None  # will hold the best loss achieved so far
   else:
-    running_avg_loss = 0 # the eval job keeps a smoother, running average loss to tell it when to implement early stopping
-    best_loss = None  # will hold the best loss achieved so far
+    running_avg_ratio = 0 # the eval job keeps a smoother, running average loss to tell it when to implement early stopping
+    best_ratio = None  # will hold the best loss achieved so far
 
   train_dir = os.path.join(FLAGS.log_root, "train")
   first_eval_step = True
@@ -279,7 +307,7 @@ def run_eval(model, batcher):
       running_avg_reward_argmax = calc_running_avg_loss(results['argmax']['avg_reward'], running_avg_reward_argmax, summary_writer, train_step, 'SentSelector/running_avg_reward/argmax')
     else:
       #running_avg_loss = calc_running_avg_loss(np.asscalar(loss), running_avg_loss, summary_writer, train_step)
-      running_avg_loss = calc_running_avg_loss(ratio, running_avg_loss, summary_writer, train_step, 'running_avg_ratio')
+      running_avg_ratio = calc_running_avg_loss(ratio, running_avg_ratio, summary_writer, train_step, 'running_avg_ratio')
 
     # If running_avg_loss is best so far, save this checkpoint (early stopping).
     # These checkpoints will appear as bestmodel-<iteration_number> in the eval dir
@@ -287,12 +315,12 @@ def run_eval(model, batcher):
       if best_reward_argmax is None or running_avg_reward_argmax > best_reward_argmax:
         tf.logging.info('Found new best model with %.3f running_avg_reward. Saving to %s', running_avg_reward_argmax, bestmodel_save_path)
         saver.save(sess, bestmodel_save_path, global_step=train_step, latest_filename='checkpoint_best')
-        best_reward_sample = running_avg_reward_sample
+        best_reward_argmax = running_avg_reward_argmax
     else:
-      if best_loss is None or running_avg_loss < best_loss:
-        tf.logging.info('Found new best model with %.3f running_avg_ratio. Saving to %s', running_avg_loss, bestmodel_save_path)
+      if best_ratio is None or running_avg_ratio < best_ratio:
+        tf.logging.info('Found new best model with %.3f running_avg_ratio. Saving to %s', running_avg_ratio, bestmodel_save_path)
         saver.save(sess, bestmodel_save_path, global_step=train_step, latest_filename='checkpoint_best')
-        best_loss = running_avg_loss
+        best_ratio = running_avg_ratio
 
     # flush the summary writer every so often
     if train_step % 100 == 0:
