@@ -166,7 +166,7 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer,
         summary_writer.flush()
 
       if train_step % FLAGS.save_model_every == 0:
-        if FLAGS.pretrained_ckpt_path:
+        if FLAGS.pretrained_selector_path:
           saver.save(sess, ckpt_path, global_step=train_step)
         else:
           sv.saver.save(sess, ckpt_path, global_step=train_step)
