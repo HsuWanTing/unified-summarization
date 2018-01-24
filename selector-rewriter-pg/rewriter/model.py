@@ -23,6 +23,7 @@ import numpy as np
 import tensorflow as tf
 from attention_decoder import attention_decoder_one_step
 from tensorflow.contrib.tensorboard.plugins import projector
+import data
 import pdb
 
 FLAGS = tf.app.flags.FLAGS
@@ -33,7 +34,15 @@ class Rewriter(object):
   def __init__(self, hps, vocab):
     self._hps = hps
     self._vocab = vocab
-    #self.current_ss = 0.
+    if hps.mode == 'train':
+      self._graph_mode = 'teacher_forcing'
+    elif hps.mode == 'eval':
+      if hps.eval_method == 'loss':
+        self._graph_mode = 'teacher_forcing'
+      elif hps.eval_method == 'rouge':
+        self._graph_mode = hps.decode_method + '_search'
+    elif hps.mode == 'evalall':
+      self._graph_mode = hps.decode_method + '_search'
 
   def _add_placeholders(self):
     """Add placeholders to the graph. These are entry points for any input data."""
@@ -50,14 +59,15 @@ class Rewriter(object):
       self._max_art_oovs = tf.placeholder(tf.int32, [], name='max_art_oovs')
 
     # decoder part
-    self._dec_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='dec_batch')
-    self._target_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='target_batch')
-    self._dec_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_dec_steps], name='dec_padding_mask')
+    if self._graph_mode in ['teacher_forcing', 'beam_search']:
+      self._dec_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='dec_batch')
+      self._target_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='target_batch')
+      self._dec_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_dec_steps], name='dec_padding_mask')
 
-    if hps.mode=="evalall":
-      self.prev_context = tf.placeholder(tf.float32, [hps.batch_size, hps.hidden_dim_rewriter*2], name='prev_context')
-      if hps.coverage:
-        self.prev_coverage = tf.placeholder(tf.float32, [hps.batch_size, None], name='prev_coverage')
+      if self._graph_mode == 'beam_search':
+        self.prev_context = tf.placeholder(tf.float32, [hps.batch_size, hps.hidden_dim_rewriter*2], name='prev_context')
+        if hps.coverage:
+          self.prev_coverage = tf.placeholder(tf.float32, [hps.batch_size, None], name='prev_coverage')
 
 
   def _make_feed_dict(self, batch, just_enc=False):
@@ -78,9 +88,10 @@ class Rewriter(object):
       feed_dict[self._enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
       feed_dict[self._max_art_oovs] = batch.max_art_oovs
     if just_enc == False:
-      feed_dict[self._dec_batch] = batch.dec_batch
-      feed_dict[self._target_batch] = batch.target_batch_rewriter
-      feed_dict[self._dec_padding_mask] = batch.dec_padding_mask
+      if self._graph_mode in ['teacher_forcing', 'beam_search']:
+        feed_dict[self._dec_batch] = batch.dec_batch
+        feed_dict[self._target_batch] = batch.target_batch_rewriter
+        feed_dict[self._dec_padding_mask] = batch.dec_padding_mask
 
     return feed_dict
 
@@ -150,7 +161,7 @@ class Rewriter(object):
                                    initializer=self.rand_unif_init, \
                                    reuse=tf.get_variable_scope().reuse)
 
-    if hps.mode == 'evalall':
+    if self._graph_mode == 'beam_search':
       # In evalall mode, our graph only contain one step deocder.
       # So need to feed in the previous step's context and coverage vector through placeholders.
       prev_coverage = self.prev_coverage if hps.coverage else None 
@@ -182,13 +193,16 @@ class Rewriter(object):
     '''Add decoder with max_dec_steps for train and eval mode, 1 step for decode mode.'''
     hps = self._hps
     vsize = self._vocab.size() # size of the vocabulary
-    dec_steps = hps.max_dec_steps if hps.mode != 'evalall' else 1
+    dec_steps = hps.max_dec_steps
 
     with tf.variable_scope('decoder'):
       attn_dists = []
       p_gens = []
       vocab_scores = []
       log_dists = []
+
+      if self._graph_mode == 'greedy_search':
+        predict_words = []
 
       for i in range(dec_steps):
         tf.logging.info("Adding attention_decoder TF timestep %i of %i", i, dec_steps)
@@ -198,18 +212,29 @@ class Rewriter(object):
         if i == 0:
           if reuse: tf.get_variable_scope().reuse_variables() # reuse variables
           self._dec_out_state = self._dec_in_state # initial the decoder state
-          if hps.mode != 'evalall':
+          if self._graph_mode in ['teacher_forcing', 'greedy_search']:
             # For train and eval mode, this is the first step, 
             # initialize context vector and coverage vector
             self.context_vector = None
             if hps.coverage: self.coverage = None
+            inp = tf.tile(tf.constant([self._vocab.word2id(data.START_DECODING)]), [hps.batch_size]) # shape (batch_size,)
+          else:  # decode mode and beam search
+            inp = dec_inputs[0]
         else:
           tf.get_variable_scope().reuse_variables() # reuse variables
+          if self._graph_mode == 'teacher_forcing':
+            inp = dec_inputs[i] # shape (batch_size,)
+          else:  # decode mode and greedy search
+            assert hps.decode_method == 'greedy'
+            inp = predict_word # shape (batch_size,)
+            # check if input is an OOV, if yes, replace with UNK token
+            unk_batch = tf.tile(tf.constant([self._vocab.word2id(data.UNKNOWN_TOKEN)]), [hps.batch_size]) # shape (batch_size,)
+            inp = tf.where(tf.less(inp, tf.constant(vsize)), inp, unk_batch) # shape (batch_size,)
 
         #################################
         # run one decoder step          #
         #################################
-        inp_emb = tf.nn.embedding_lookup(self.embedding, dec_inputs[i]) # (batch_size, emb_size)
+        inp_emb = tf.nn.embedding_lookup(self.embedding, inp) # (batch_size, emb_size)
         decoder_output, self._dec_out_state, attn_dist, self.context_vector, p_gen, self.coverage = \
                                                     self._add_decoder_one_step(inp_emb)
 
@@ -238,10 +263,17 @@ class Rewriter(object):
           log_dist = tf.log(vocab_dist)
         log_dists.append(log_dist)
 
+        if self._graph_mode == 'greedy_search':
+          predict_word = tf.stop_gradient(tf.to_int32(tf.argmax(log_dist, 1))) # shape (batch_size,)
+          predict_words.append(predict_word)
+
     #####################################################
     # Return the values that are needed in current mode #
     #####################################################
-    return vocab_scores, log_dists, attn_dists, p_gens
+    if self._graph_mode == 'greedy_search':
+      return tf.stack(predict_words, axis=1)  # shape (batch_size, max_dec_steps)
+    else:
+      return vocab_scores, log_dists, attn_dists, p_gens
 
 
   def _calc_final_dist_one_step(self, vocab_dist, attn_dist, p_gen):
@@ -326,7 +358,8 @@ class Rewriter(object):
                                           initializer=self.trunc_norm_init)
         if hps.mode=="train": self._add_emb_vis(self.embedding) # add to tensorboard
         emb_enc_inputs = tf.nn.embedding_lookup(self.embedding, self._enc_batch) # tensor with shape (batch_size, max_enc_steps, emb_size)
-        dec_inputs = tf.unstack(self._dec_batch, axis=1) # list of max_dec_steps tensor with shape (batch_size,)
+        if self._graph_mode in ['teacher_forcing', 'beam_search']:
+          dec_inputs = tf.unstack(self._dec_batch, axis=1) # list of max_dec_steps tensor with shape (batch_size,)
 
       ########################################
       # Add the encoder.                     #
@@ -342,12 +375,16 @@ class Rewriter(object):
       ########################################
       if hps.model == 'end2end': 
         self._selector_probs = selector_probs
-      vocab_scores, log_dists, self.attn_dists, self.p_gens = self._add_decoder(dec_inputs)
+
+      if self._graph_mode == 'greedy_search':
+        self.greedy_search_words = self._add_decoder(dec_inputs=None)
+      else:
+        vocab_scores, log_dists, self.attn_dists, self.p_gens = self._add_decoder(dec_inputs)
 
       ################################################
       # Calculate the loss for train and eval mode   #
       ################################################
-      if hps.mode in ['train', 'eval']:
+      if self._graph_mode == 'teacher_forcing':
         with tf.variable_scope('loss'):
           ################################
           # teacher forcing loss         #
@@ -387,10 +424,8 @@ class Rewriter(object):
     ##########################################
     # produce top K words in decode mode     #
     ##########################################
-    if hps.mode == "evalall":
+    if self._graph_mode == 'beam_search':
       # We run decode beam search mode one decoder step at a time
-      # For policy gradient, results will be the same for running sample decoder or argmax decoder, 
-      # because we will only run one decoder step and will use neither self.pred_words_sample nor self.pred_words_argmax
       assert len(log_dists)==1 # log_dists is a singleton list containing shape (batch_size, extended_vsize)
       log_dists = log_dists[0]
       self._topk_log_probs, self._topk_ids = tf.nn.top_k(log_dists, hps.batch_size*2) # note batch_size=beam_size in decode mode
@@ -467,6 +502,12 @@ class Rewriter(object):
       to_return['coverage_loss'] = self._coverage_loss
 
     return sess.run(to_return, feed_dict)
+
+  def run_greedy_search(self, sess, batch):
+    hps = self._hps
+    feed_dict = self._make_feed_dict(batch)
+    return sess.run(self.greedy_search_words, feed_dict)
+
 
   def run_encoder(self, sess, batch):
     """For beam search decoding. Run the encoder on the batch and return the encoder states and decoder initial state.

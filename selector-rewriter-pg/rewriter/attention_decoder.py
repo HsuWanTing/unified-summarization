@@ -108,8 +108,8 @@ def attention_decoder_one_step(decoder_input, prev_state, encoder_states, enc_pa
             batch_nums_tile = tf.tile(batch_nums, [1, attn_len]) # shape (batch_size, attn_len)
             indices = tf.stack( (batch_nums_tile, enc_sent_id_mask), axis=2) # shape (batch_size, attn_len, 2)
             # All pad tokens will get probability of 0.0 since the sentence id is -1 (gather_nd will produce 0.0 for invalid indices)
-            selector_probs_projected = tf.gather_nd(selector_probs, indices)
-            attn_dist = attn_dist * selector_probs_projected
+            selector_probs_projected = tf.gather_nd(selector_probs, indices) # shape (batch_size, attn_len)
+            attn_dist *=  selector_probs_projected # shape (batch_size, attn_len)
           
           attn_dist *= enc_padding_mask # apply mask, attention probabilities of pad tokens will be 0
           masked_sums = tf.reduce_sum(attn_dist, axis=1, keep_dims=True) # shape (batch_size)

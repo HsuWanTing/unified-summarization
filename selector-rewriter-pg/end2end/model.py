@@ -142,3 +142,8 @@ class SelectorRewriter(object):
     return sess.run(to_return, feed_dict)
 
 
+  def run_greedy_search(self, sess, batch):
+    hps = self._hps
+    feed_dict = self._selector._make_feed_dict(batch)
+    feed_dict.update(self._rewriter._make_feed_dict(batch))
+    return sess.run(self._rewriter.greedy_search_words, feed_dict)

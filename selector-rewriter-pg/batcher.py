@@ -431,14 +431,21 @@ class Batcher(object):
     In decode mode, makes batches that each contain a single example repeated.
     """
     while True:
-      if self._hps.mode != 'evalall':
+      if (self._hps.mode == 'evalall' and self._hps.decode_method == 'beam') or \
+         (self._hps.mode == 'eval' and self._hps.eval_method == 'rouge' and self._hps.decode_method == 'beam'):
+        # beam search decode mode
+        ex = self._example_queue.get()
+        b = [ex for _ in xrange(self._hps.batch_size)]
+        self._batch_queue.put(Batch(b, self._hps, self._vocab))
+      else:
         # Get bucketing_cache_size-many batches of Examples into a list, then sort
         inputs = []
         for _ in xrange(self._hps.batch_size * self._bucketing_cache_size):
           inputs.append(self._example_queue.get())
 
         if self._hps.model in ['rewriter', 'end2end']:
-          inputs = sorted(inputs, key=lambda inp: inp.enc_len) # sort by length of encoder sequence
+          if self._hps.mode == 'train' or (self._hps.mode == 'eval' and self._hps.eval_method == 'loss'):
+            inputs = sorted(inputs, key=lambda inp: inp.enc_len) # sort by length of encoder sequence
 
         # Group the sorted Examples into batches, optionally shuffle the batches, and place in the batch queue.
         batches = []
@@ -448,11 +455,6 @@ class Batcher(object):
           shuffle(batches)
         for b in batches:  # each b is a list of Example objects
           self._batch_queue.put(Batch(b, self._hps, self._vocab))
-
-      else: # beam search decode mode
-        ex = self._example_queue.get()
-        b = [ex for _ in xrange(self._hps.batch_size)]
-        self._batch_queue.put(Batch(b, self._hps, self._vocab))
 
 
   def watch_threads(self):

@@ -21,6 +21,7 @@ import time
 import os
 import tensorflow as tf
 import numpy as np
+import cPickle as pk
 import util
 import pdb
 
@@ -146,8 +147,10 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer, \
   tf.logging.info("starting run_training")
   if FLAGS.coverage:
     ckpt_path = os.path.join(FLAGS.log_root, "train", "model.ckpt_cov")
+    #ckpt_path_save = os.path.join(FLAGS.log_root, "train_saved", "model.ckpt_cov")
   else:
     ckpt_path = os.path.join(FLAGS.log_root, "train", "model.ckpt")
+    #ckpt_path_save = os.path.join(FLAGS.log_root, "train_saved", "model.ckpt")
 
   with sess_context_manager as sess:
     if FLAGS.pretrained_selector_path and FLAGS.pretrained_rewriter_path:
@@ -209,6 +212,14 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer, \
           all_saver.save(sess, ckpt_path, global_step=train_step)
         else:
           sv.saver.save(sess, ckpt_path, global_step=train_step)
+
+      '''
+      if train_step % FLAGS.save_model_every_rouge == 0:
+        if FLAGS.pretrained_selector_path and FLAGS.pretrained_rewriter_path:
+          all_saver.save(sess, ckpt_path_save, global_step=train_step)
+        else:
+          sv.saver.save(sess, ckpt_path_save, global_step=train_step)
+      '''
 
       print 'Step: ', train_step
 
@@ -300,3 +311,96 @@ def run_eval(model, batcher):
     if train_step % 100 == 0:
       summary_writer.flush()
 
+
+def run_eval_rouge(evaluator):
+  """Repeatedly runs eval iterations, logging to screen and writing summaries. Saves the model with the best loss seen so far."""
+  if "val" in FLAGS.data_path: dataset = "val"
+  elif "test" in FLAGS.data_path: dataset = "test"
+  eval_dir = os.path.join(FLAGS.log_root, "eval_" + dataset + '_rouge') # make a subdir of the root dir for eval data
+  bestmodel_save_path = os.path.join(eval_dir, 'bestmodel') # this is where checkpoints of best models are saved
+  summary_writer = tf.summary.FileWriter(eval_dir)
+
+  best_rouge_file = os.path.join(eval_dir, 'best_rouge.pkl')
+  if os.path.exists(best_rouge_file):
+    best_rouges = pk.load(open(best_rouge_file, 'rb'))
+    current_step = best_rouges['step']
+    best_rouge1 = best_rouges['1']
+    best_rouge2 = best_rouges['2']
+    best_rougeL = best_rouges['l']
+    tf.logging.info('previous best rouge1: %3f, rouge2: %3f, rougeL: %3f, step: %d', \
+                    best_rouge1, best_rouge2, best_rougeL, current_step)
+  else:
+    current_step = None
+    best_rouge1 = None  # will hold the best rouge1 achieved so far
+    best_rouge2 = None  # will hold the best rouge2 achieved so far
+    best_rougeL = None  # will hold the best rougeL achieved so far
+
+  train_dir = os.path.join(FLAGS.log_root, "train")
+  if FLAGS.coverage:
+    ckpt_base_path = os.path.join(train_dir, "model.ckpt_cov")
+  else:
+    ckpt_base_path = os.path.join(train_dir, "model.ckpt")
+
+  while True:
+    if current_step is None:
+      ckpt_state = tf.train.get_checkpoint_state(train_dir)
+      if ckpt_state:
+        step = os.path.basename(ckpt_state.model_checkpoint_path).split('-')[-1]
+
+        if int(step) < FLAGS.start_eval_rouge:
+          tf.logging.info('Step = ' + str(step) + ' (smaller than start_eval_rouge, Sleeping for 10 secs...)')
+          time.sleep(10)
+          continue
+        else:
+          current_step = int(step)
+          current_ckpt_path = ckpt_base_path + '-' + str(current_step)
+      else:
+        tf.logging.info("Failed to load checkpoint from %s. Sleeping for %i secs...", train_dir, 10)
+        time.sleep(10)
+        continue
+    else:
+      current_step += FLAGS.save_model_every
+      current_ckpt_path = ckpt_base_path + '-' + str(current_step)
+      evaluator.init_batcher()
+
+    tf.logging.info('max_enc_steps: %d, max_dec_steps: %d', FLAGS.max_enc_steps, FLAGS.max_dec_steps)
+    do_eval = evaluator.prepare_evaluate(ckpt_path=current_ckpt_path)
+    if not do_eval:  # The checkpoint has already been evaluated. Evaluate next one.
+      tf.logging.info('step %d checkpoint has already been evaluated, evaluate next checkpoint.', current_step)
+      continue
+    rouge_results, rouge_results_str = evaluator.evaluate()
+
+    # print the loss and coverage loss to screen
+    results_file = os.path.join(eval_dir, "ROUGE_results_all.txt")
+    with open(results_file, "a") as f:
+      f.write('Step: ' + str(current_step))
+      f.write(rouge_results_str + '\n')
+
+    # add summaries
+    write_to_summary(rouge_results['1'], 'rouge_results/rouge1', current_step, summary_writer)
+    write_to_summary(rouge_results['2'], 'rouge_results/rouge2', current_step, summary_writer)
+    write_to_summary(rouge_results['l'], 'rouge_results/rougeL', current_step, summary_writer)
+
+    # If running_avg_loss is best so far, save this checkpoint (early stopping).
+    # These checkpoints will appear as bestmodel-<iteration_number> in the eval dir
+    better_metric = 0
+    if best_rouge1 is None or rouge_results['1'] > best_rouge1:
+      best_rouge1 = rouge_results['1']
+      better_metric += 1
+    if best_rouge2 is None or rouge_results['2'] > best_rouge2:
+      best_rouge2 = rouge_results['2']
+      better_metric += 1
+    if best_rougeL is None or rouge_results['l'] > best_rougeL:
+      best_rougeL = rouge_results['l']
+      better_metric += 1
+
+    if better_metric >= 2:
+      tf.logging.info('Found new best model with rouge1 %f, rouge2 %f, rougeL %f. Saving to %s', rouge_results['1'], rouge_results['2'], rouge_results['l'], bestmodel_save_path)
+      evaluator._saver.save(evaluator._sess, bestmodel_save_path, global_step=current_step, latest_filename='checkpoint_best')
+      rouge_results['step'] = current_step
+      with open(best_rouge_file, 'wb') as f:
+        pk.dump(rouge_results, f)
+
+    # flush the summary writer every so often
+    if current_step % 100 == 0:
+      summary_writer.flush()
