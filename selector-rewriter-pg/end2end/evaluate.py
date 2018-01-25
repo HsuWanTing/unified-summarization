@@ -5,6 +5,7 @@ from batcher import Batcher
 import beam_search
 import data
 import cPickle as pk
+import json
 import pyrouge
 import util
 import logging
@@ -16,8 +17,9 @@ FLAGS = tf.app.flags.FLAGS
 SECS_UNTIL_NEW_CKPT = 60  # max number of seconds before loading new checkpoint
 
 class End2EndEvaluator(object):
+  """Evaluate selector and rewriter"""
 
-  def __init__(self, hps, model, batcher, vocab):
+  def __init__(self, model, batcher, vocab):
     """Initialize decoder.
 
     Args:
@@ -25,7 +27,6 @@ class End2EndEvaluator(object):
       batcher: a Batcher object.
       vocab: Vocabulary object
     """
-    self._hps = hps
     self._model = model
     self._model.build_graph()
     self._batcher = batcher
@@ -34,7 +35,6 @@ class End2EndEvaluator(object):
     self._sess = tf.Session(config=util.get_config())
     if FLAGS.mode == 'evalall':
       self.prepare_evaluate()
-
 
   def prepare_evaluate(self, ckpt_path=None):
     # Load an initial checkpoint to use for decoding
@@ -77,10 +77,12 @@ class End2EndEvaluator(object):
       if not os.path.exists(self._rouge_ref_dir): os.mkdir(self._rouge_ref_dir)
       self._rouge_dec_dir = os.path.join(self._decode_dir, "decoded")
       if not os.path.exists(self._rouge_dec_dir): os.mkdir(self._rouge_dec_dir)
-      #self._rouge_vis_dir = os.path.join(self._decode_dir, "visualize")
-      #if not os.path.exists(self._rouge_vis_dir): os.mkdir(self._rouge_vis_dir)
-      #self._result_dir = os.path.join(self._decode_dir, "result")
-      #if not os.path.exists(self._result_dir): os.mkdir(self._result_dir)
+      if FLAGS.save_vis:
+        self._rouge_vis_dir = os.path.join(self._decode_dir, "visualize")
+        if not os.path.exists(self._rouge_vis_dir): os.mkdir(self._rouge_vis_dir)
+      if FLAGS.save_pkl:
+        self._result_dir = os.path.join(self._decode_dir, "result")
+        if not os.path.exists(self._result_dir): os.mkdir(self._result_dir)
     return True
 
   def evaluate(self):
@@ -121,31 +123,34 @@ class End2EndEvaluator(object):
 
       if FLAGS.decode_method == 'greedy':
         output_ids = self._model.run_greedy_search(self._sess, batch)
+        for i in range(FLAGS.batch_size):
+          self.process_one_article(batch.original_articles_sents[i], batch.original_abstracts_sents[i], \
+                                   batch.original_extracts_ids[i], output_ids[i], \
+                                   (batch.art_oovs[i] if FLAGS.pointer_gen else None), \
+                                   None, None, None, None, counter)
+          counter += 1
       else:
+        # Get sentence probabilities from selector
+        selector_output = self._model._selector.run_eval_step(self._sess, batch, probs_only=True)
+        sent_probs = selector_output['probs'][0].tolist()
         # Run beam search to get best Hypothesis
         best_hyp = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
 
         # Extract the output ids from the hypothesis and convert back to words
         output_ids = [int(t) for t in best_hyp.tokens[1:]]    # remove start token
         best_hyp.log_probs = best_hyp.log_probs[1:]   # remove start token probability
-
-      batch_size = 1 if FLAGS.decode_method == 'beam' else FLAGS.batch_size
-      for i in range(batch_size):
-        self.process_one_article(batch.original_articles_sents[i], batch.original_abstracts_sents[i], \
-                                 batch.original_extracts_ids[i], output_ids[i], \
-                                 (batch.art_oovs[i] if FLAGS.pointer_gen else None), counter)
+        self.process_one_article(batch.original_articles_sents[0], batch.original_abstracts_sents[0], \
+                                 batch.original_extracts_ids[0], output_ids, \
+                                 (batch.art_oovs[0] if FLAGS.pointer_gen else None), \
+                                 best_hyp.attn_dists, best_hyp.p_gens, best_hyp.log_probs, sent_probs, counter)
         counter += 1
 
  
   def process_one_article(self, original_article_sents, original_abstract_sents, \
-                          original_selected_ids, output_ids, oovs, counter):
-    original_article = ' '.join(original_article_sents)
-    original_abstract = ' '.join(original_abstract_sents)
-    article_withunks = data.show_art_oovs(original_article, self._vocab) # string
-    abstract_withunks = data.show_abs_oovs(original_abstract, self._vocab, (oovs if FLAGS.pointer_gen else None))
-
+                          original_selected_ids, output_ids, oovs, \
+                          attn_dists, p_gens, log_probs, sent_probs, counter):
     # Remove the [STOP] token from decoded_words, if necessary
-    decoded_words = data.outputids2words(output_ids, self._vocab, (oovs if FLAGS.pointer_gen else None))
+    decoded_words = data.outputids2words(output_ids, self._vocab, oovs)
     try:
       fst_stop_idx = decoded_words.index(data.STOP_DECODING) # index of the (first) [STOP] symbol
       decoded_words = decoded_words[:fst_stop_idx]
@@ -157,9 +162,24 @@ class End2EndEvaluator(object):
     if FLAGS.single_pass:
       verbose = False if FLAGS.mode == 'eval' else True
       self.write_for_rouge(original_abstract_sents, decoded_sents, counter, verbose) # write ref summary and decoded summary to file, to eval with pyrouge later
-      #self.write_for_attnvis(article_withunks, abstract_withunks, decoded_words, best_hyp.attn_dists, \
-      #                       best_hyp.p_gens, best_hyp.log_probs, counter)
-      #self.save_result(original_article_sents, original_abstract_sents, decoded_sents, counter, verbose)
+      if FLAGS.decode_method == 'beam' and FLAGS.save_vis:
+        sent_probs_per_word = []
+        for sent_id, sent in enumerate(original_article_sents):
+          sent_len = len(sent.split(' '))
+          for _ in range(sent_len):
+            if sent_id < FLAGS.max_art_len:
+              sent_probs_per_word.append(sent_probs[sent_id])
+            else:
+              sent_probs_per_word.append(0)
+        original_article = ' '.join(original_article_sents)
+        original_abstract = ' '.join(original_abstract_sents)
+        article_withunks = data.show_art_oovs(original_article, self._vocab) # string
+        abstract_withunks = data.show_abs_oovs(original_abstract, self._vocab, oovs)
+        self.write_for_attnvis(article_withunks, abstract_withunks, decoded_words, \
+                               attn_dists, p_gens, log_probs, sent_probs_per_word, counter, verbose)
+      if FLAGS.save_pkl:
+        self.save_result(original_article_sents, original_abstract_sents, \
+                         original_selected_ids, decoded_sents, counter, verbose)
 
   def save_result(self, article_sents, reference_sents, gt_ids, decoded_sents, index, verbose=False):
     """save the result in pickle format"""
@@ -201,7 +221,8 @@ class End2EndEvaluator(object):
       tf.logging.info("Wrote example %i to file" % ex_index)
 
 
-  def write_for_attnvis(self, article, abstract, decoded_words, attn_dists, p_gens, log_probs, count=None, verbose=False):
+  def write_for_attnvis(self, article, abstract, decoded_words, attn_dists, p_gens, log_probs, \
+                        sent_probs, count=None, verbose=False):
     """Write some data to json file, which can be read into the in-browser attention visualizer tool:
       https://github.com/abisee/attn_vis
 
@@ -219,7 +240,8 @@ class End2EndEvaluator(object):
         'decoded_lst': [make_html_safe(t) for t in decoded_lst],
         'abstract_str': make_html_safe(abstract),
         'attn_dists': attn_dists,
-        'probs': np.exp(log_probs).tolist()
+        'probs': np.exp(log_probs).tolist(),
+        'sent_probs': sent_probs
     }
     if FLAGS.pointer_gen:
       to_write['p_gens'] = p_gens
@@ -233,7 +255,7 @@ class End2EndEvaluator(object):
       tf.logging.info('Wrote visualization data to %s', output_fname)
 
   def init_batcher(self):
-    self._batcher = Batcher(FLAGS.data_path, self._vocab, self._hps, single_pass=FLAGS.single_pass)
+    self._batcher = Batcher(FLAGS.data_path, self._vocab, self._model._hps, single_pass=FLAGS.single_pass)
 
 def print_results(article, abstract, decoded_output):
   """Prints the article, the reference summmary and the decoded summary to screen"""

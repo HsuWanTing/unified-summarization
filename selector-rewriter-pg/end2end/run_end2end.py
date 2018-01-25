@@ -32,32 +32,6 @@ def write_to_summary(value, tag_name, step, summary_writer):
   summary.value.add(tag=tag_name, simple_value=value)
   summary_writer.add_summary(summary, step)
 
-def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, tag_name, decay=0.99):
-  """Calculate the running average loss via exponential decay.
-  This is used to implement early stopping w.r.t. a more smooth loss curve than the raw loss curve.
-
-  Args:
-    loss: loss on the most recent eval step
-    running_avg_loss: running_avg_loss so far
-    summary_writer: FileWriter object to write for tensorboard
-    step: training iteration step
-    decay: rate of exponential decay, a float between 0 and 1. Larger is smoother.
-
-  Returns:
-    running_avg_loss: new running average loss
-  """
-  if running_avg_loss == 0:  # on the first iteration just take the loss
-    running_avg_loss = loss
-  else:
-    running_avg_loss = running_avg_loss * decay + (1 - decay) * loss
-  running_avg_loss = min(running_avg_loss, 12)  # clip
-  loss_sum = tf.Summary()
-  tag_name2 = tag_name + '/decay=%f' % (decay)
-  loss_sum.value.add(tag=tag_name2, simple_value=running_avg_loss)
-  summary_writer.add_summary(loss_sum, step)
-  tf.logging.info(tag_name + ': ' + str(running_avg_loss))
-  return running_avg_loss
-
 def convert_to_coverage_model():
   """Load non-coverage checkpoint, add initialized extra variables for coverage, and save as new checkpoint"""
   tf.logging.info("converting non-coverage model to coverage model..")
@@ -297,8 +271,8 @@ def run_eval(model, batcher):
     summary_writer.add_summary(summaries, train_step)
 
     # calculate running avg loss
-    running_avg_loss = calc_running_avg_loss(np.asscalar(loss), running_avg_loss, summary_writer, train_step, 'running_avg_loss')
-    running_avg_ratio = calc_running_avg_loss(ratio, running_avg_ratio, summary_writer, train_step, 'running_avg_ratio')
+    running_avg_loss = util.calc_running_avg_loss(np.asscalar(loss), running_avg_loss, summary_writer, train_step, 'running_avg_loss')
+    running_avg_ratio = util.calc_running_avg_loss(ratio, running_avg_ratio, summary_writer, train_step, 'running_avg_ratio')
 
     # If running_avg_loss is best so far, save this checkpoint (early stopping).
     # These checkpoints will appear as bestmodel-<iteration_number> in the eval dir

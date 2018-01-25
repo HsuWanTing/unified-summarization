@@ -64,12 +64,14 @@ tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be sa
 tf.app.flags.DEFINE_string('eval_method', '', 'loss or rouge (loss mode is to get the loss for one batch; rouge mode is to get rouge scores for the whole dataset)')
 tf.app.flags.DEFINE_integer('start_eval_rouge', 30000, 'for rouge mode, start evaluating rouge scores after this iteration')
 
-# For evalall mode
+# For evalall mode or (eval mode and eval_method == 'rouge')
 tf.app.flags.DEFINE_string('decode_method', '', 'greedy/beam')
 tf.app.flags.DEFINE_boolean('decode_parallel', False, '')
 tf.app.flags.DEFINE_boolean('load_best_val_model', False, '')
 tf.app.flags.DEFINE_boolean('load_best_test_model', False, '')
 tf.app.flags.DEFINE_string('eval_ckpt_path', '', 'checkpoint path for evalall mode')
+tf.app.flags.DEFINE_boolean('save_pkl', False, 'whether to save the results as pickle files')
+tf.app.flags.DEFINE_boolean('save_vis', False, 'whether to save the results for visualization')
 
 # For end2end training, need to load pretrained model
 tf.app.flags.DEFINE_string('pretrained_selector_path', '', 'selector checkpoint path for end2end model')
@@ -103,7 +105,6 @@ tf.app.flags.DEFINE_integer('min_select_sent', 5, 'min sentences need to be sele
 tf.app.flags.DEFINE_integer('max_select_sent', 20, 'max sentences to be selected')
 tf.app.flags.DEFINE_boolean('eval_gt_rouge', False, 'whether to evaluate ground-truth selected sentences ROUGE scores')
 tf.app.flags.DEFINE_boolean('eval_rouge', False, 'whether to evaluate ROUGE scores')
-tf.app.flags.DEFINE_boolean('save_pkl', False, 'whether to save the results as pickle files')
 tf.app.flags.DEFINE_boolean('save_bin', True, 'whether to save the results as binary files')
 tf.app.flags.DEFINE_boolean('plot', True, 'whether to plot the precision/recall and recall/ratio curves')
 
@@ -196,13 +197,18 @@ def main(unused_argv):
       run_rewriter.setup_training(model, batcher)
     elif hps.mode == 'eval':
       model = Rewriter(hps, vocab)
-      run_rewriter.run_eval(model, batcher)
+      if FLAGS.eval_method == 'loss':
+        run_rewriter.run_eval(model, batcher)
+      else:
+        assert FLAGS.decode_parallel == False and FLAGS.decode_method == 'greedy'
+        decoder = BeamSearchDecoder(model, batcher, vocab)
+        run_rewriter.run_eval_rouge(decoder)
     elif hps.mode == 'evalall':
       decode_model_hps = hps  # This will be the hyperparameters for the decoder model
       decode_model_hps = hps._replace(max_dec_steps=1) # The model is configured with max_dec_steps=1 because we only ever run one step of the decoder at a time (to do beam search). Note that the batcher is initialized with max_dec_steps equal to e.g. 100 because the batches need to contain the full summaries
       model = Rewriter(decode_model_hps, vocab)
       decoder = BeamSearchDecoder(model, batcher, vocab)
-      decoder.decode() # decode indefinitely (unless single_pass=True, in which case deocde the dataset exactly once)
+      decoder.evaluate() # decode indefinitely (unless single_pass=True, in which case deocde the dataset exactly once)
   elif FLAGS.model == 'end2end':
     if hps.mode == 'train':
       print "creating model..."
@@ -217,8 +223,8 @@ def main(unused_argv):
       if FLAGS.eval_method == 'loss':
         run_end2end.run_eval(end2end_model, batcher)
       elif FLAGS.eval_method == 'rouge':
-        assert FLAGS.decode_parallel == False
-        evaluator = End2EndEvaluator(hps, end2end_model, batcher, vocab)
+        assert FLAGS.decode_parallel == False and FLAGS.decode_method == 'greedy'
+        evaluator = End2EndEvaluator(end2end_model, batcher, vocab)
         run_end2end.run_eval_rouge(evaluator)
     elif hps.mode == 'evalall':
       eval_model_hps = hps  # This will be the hyperparameters for the decoder model
@@ -227,7 +233,7 @@ def main(unused_argv):
       select_model = SentenceSelector(eval_model_hps, vocab)
       rewrite_model = Rewriter(eval_model_hps, vocab)
       end2end_model = SelectorRewriter(hps, select_model, rewrite_model)
-      evaluator = End2EndEvaluator(hps, end2end_model, batcher, vocab)
+      evaluator = End2EndEvaluator(end2end_model, batcher, vocab)
       evaluator.evaluate() # decode indefinitely (unless single_pass=True, in which case deocde the dataset exactly once)
 
 if __name__ == '__main__':

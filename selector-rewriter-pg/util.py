@@ -29,6 +29,32 @@ def get_config():
   config.gpu_options.allow_growth=True
   return config
 
+def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, tag_name, decay=0.99):
+  """Calculate the running average loss via exponential decay.
+  This is used to implement early stopping w.r.t. a more smooth loss curve than the raw loss curve.
+
+  Args:
+    loss: loss on the most recent eval step
+    running_avg_loss: running_avg_loss so far
+    summary_writer: FileWriter object to write for tensorboard
+    step: training iteration step
+    decay: rate of exponential decay, a float between 0 and 1. Larger is smoother.
+
+  Returns:
+    running_avg_loss: new running average loss
+  """
+  if running_avg_loss == 0:  # on the first iteration just take the loss
+    running_avg_loss = loss
+  else:
+    running_avg_loss = running_avg_loss * decay + (1 - decay) * loss
+  running_avg_loss = min(running_avg_loss, 12)  # clip
+  loss_sum = tf.Summary()
+  tag_name2 = tag_name + '/decay=%f' % (decay)
+  loss_sum.value.add(tag=tag_name2, simple_value=running_avg_loss)
+  summary_writer.add_summary(loss_sum, step)
+  tf.logging.info(tag_name + ': ' + str(running_avg_loss))
+  return running_avg_loss
+
 def load_ckpt(saver, sess, ckpt_dir='train', ckpt_path=None):
   """Load checkpoint from the train directory and restore it to saver and sess, waiting 10 secs in the case of failure. Also returns checkpoint name."""
   ckpt_dir = os.path.join(FLAGS.log_root, ckpt_dir)

@@ -33,6 +33,21 @@ class SentenceSelector(object):
   def __init__(self, hps, vocab):
     self._hps = hps
     self._vocab = vocab
+    if hps.mode == 'train':
+      if hps.model == 'end2end' and hps.selector_loss_in_end2end == False:
+        self._graph_mode = 'not_compute_loss'
+      else:
+        self._graph_mode = 'compute_loss'
+    elif hps.mode == 'eval':
+      if hps.model == 'end2end':
+        if hps.selector_loss_in_end2end == False or hps.eval_method == 'rouge':
+          self._graph_mode = 'not_compute_loss'
+        else:
+          self._graph_mode = 'compute_loss'
+      elif hps.model == 'selector':
+        self._graph_mode = 'compute_loss'
+    elif hps.mode == 'evalall':
+      self._graph_mode = 'not_compute_loss'
 
   def _add_placeholders(self):
     """Add placeholders to the graph. These are entry points for any input data."""
@@ -42,7 +57,7 @@ class SentenceSelector(object):
     self._sent_lens = tf.placeholder(tf.int32, [hps.batch_size, hps.max_art_len], name='sent_lens')
     self._art_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len], name='art_padding_mask')
     self._sent_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len, hps.max_sent_len], name='sent_padding_mask')
-    if hps.model == 'selector' or (hps.model == 'end2end' and hps.selector_loss_in_end2end):
+    if self._graph_mode == 'compute_loss':
       if hps.loss != 'PG':
         self._target_batch = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len], name='target_batch')
       else:
@@ -64,7 +79,7 @@ class SentenceSelector(object):
     feed_dict[self._sent_lens] = batch.sent_lens # (batch_size, max_art_len)
     feed_dict[self._art_padding_mask] = batch.art_padding_mask # (batch_size, max_art_len)
     feed_dict[self._sent_padding_mask] = batch.sent_padding_mask # (batch_size, max_art_lens, max_sent_len)
-    if hps.model == 'selector' or (hps.model == 'end2end' and hps.selector_loss_in_end2end):
+    if self._graph_mode == 'compute_loss':
       if hps.loss != 'PG':
         feed_dict[self._target_batch] = batch.target_batch_selector # (batch_size, max_art_len)
     return feed_dict
@@ -238,7 +253,7 @@ class SentenceSelector(object):
       ################################################
       # Calculate the loss                           #
       ################################################
-      if hps.model == 'selector' or (hps.model == 'end2end' and hps.selector_loss_in_end2end):
+      if self._graph_mode == 'compute_loss':
         with tf.variable_scope('loss'):
           if hps.loss == 'CE':
             losses = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=self._target_batch) # (batch_size, max_art_len)
@@ -367,7 +382,8 @@ class SentenceSelector(object):
     return results
 
   def run_train_step(self, sess, batch):
-    """Runs one training iteration. Returns a dictionary containing train op, 
+    """This function will only be called when hps.model == selector
+       Runs one training iteration. Returns a dictionary containing train op, 
        summaries, loss, global_step and (optionally) coverage loss."""
     hps = self._hps
     feed_dict = self._make_feed_dict(batch)
@@ -402,12 +418,13 @@ class SentenceSelector(object):
       return sess.run(to_return, feed_dict)
 
   def run_eval_step(self, sess, batch, probs_only=False):
-    """Runs one evaluation iteration. Returns a dictionary containing summaries, 
+    """This function will be called when hps.model == selector or end2end
+       Runs one evaluation iteration. Returns a dictionary containing summaries, 
        loss, global_step and (optionally) coverage loss."""
     hps = self._hps
     feed_dict = self._make_feed_dict(batch)
 
-    if hps.loss == 'PG':
+    if self._graph_mode == 'compute_loss' and hps.loss == 'PG':
       (actions_argmax, actions_sample) = sess.run([self.actions_argmax, \
                                                    self.actions_sample], feed_dict)  # (batch_size, max_art_len)
       results_argmax = self._get_rewards(actions_argmax, batch)

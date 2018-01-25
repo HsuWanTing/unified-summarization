@@ -26,33 +26,10 @@ import pdb
 
 FLAGS = tf.app.flags.FLAGS
 
-
-def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, decay=0.99):
-  """Calculate the running average loss via exponential decay.
-  This is used to implement early stopping w.r.t. a more smooth loss curve than the raw loss curve.
-
-  Args:
-    loss: loss on the most recent eval step
-    running_avg_loss: running_avg_loss so far
-    summary_writer: FileWriter object to write for tensorboard
-    step: training iteration step
-    decay: rate of exponential decay, a float between 0 and 1. Larger is smoother.
-
-  Returns:
-    running_avg_loss: new running average loss
-  """
-  if running_avg_loss == 0:  # on the first iteration just take the loss
-    running_avg_loss = loss
-  else:
-    running_avg_loss = running_avg_loss * decay + (1 - decay) * loss
-  running_avg_loss = min(running_avg_loss, 12)  # clip
-  loss_sum = tf.Summary()
-  tag_name = 'running_avg_loss/decay=%f' % (decay)
-  loss_sum.value.add(tag=tag_name, simple_value=running_avg_loss)
-  summary_writer.add_summary(loss_sum, step)
-  tf.logging.info('running_avg_loss: %f', running_avg_loss)
-  return running_avg_loss
-
+def write_to_summary(value, tag_name, step, summary_writer):
+  summary = tf.Summary()
+  summary.value.add(tag=tag_name, simple_value=value)
+  summary_writer.add_summary(summary, step)
 
 def convert_to_pointer_model():
   """Load non-pointer checkpoint, add initialized extra variables for pointer, and save as new checkpoint"""
@@ -234,7 +211,7 @@ def run_eval(model, batcher):
     summary_writer.add_summary(summaries, train_step)
 
     # calculate running avg loss
-    running_avg_loss = calc_running_avg_loss(np.asscalar(loss), running_avg_loss, summary_writer, train_step)
+    running_avg_loss = util.calc_running_avg_loss(np.asscalar(loss), running_avg_loss, summary_writer, train_step, 'running_avg_loss')
 
     # If running_avg_loss is best so far, save this checkpoint (early stopping).
     # These checkpoints will appear as bestmodel-<iteration_number> in the eval dir
@@ -247,3 +224,95 @@ def run_eval(model, batcher):
     if train_step % 100 == 0:
       summary_writer.flush()
 
+def run_eval_rouge(evaluator):
+  """Repeatedly runs eval iterations, logging to screen and writing summaries. Saves the model with the best loss seen so far."""
+  if "val" in FLAGS.data_path: dataset = "val"
+  elif "test" in FLAGS.data_path: dataset = "test"
+  eval_dir = os.path.join(FLAGS.log_root, "eval_" + dataset + '_rouge') # make a subdir of the root dir for eval data
+  bestmodel_save_path = os.path.join(eval_dir, 'bestmodel') # this is where checkpoints of best models are saved
+  summary_writer = tf.summary.FileWriter(eval_dir)
+
+  best_rouge_file = os.path.join(eval_dir, 'best_rouge.pkl')
+  if os.path.exists(best_rouge_file):
+    best_rouges = pk.load(open(best_rouge_file, 'rb'))
+    current_step = best_rouges['step']
+    best_rouge1 = best_rouges['1']
+    best_rouge2 = best_rouges['2']
+    best_rougeL = best_rouges['l']
+    tf.logging.info('previous best rouge1: %3f, rouge2: %3f, rougeL: %3f, step: %d', \
+                    best_rouge1, best_rouge2, best_rougeL, current_step)
+  else:
+    current_step = None
+    best_rouge1 = None  # will hold the best rouge1 achieved so far
+    best_rouge2 = None  # will hold the best rouge2 achieved so far
+    best_rougeL = None  # will hold the best rougeL achieved so far
+
+  train_dir = os.path.join(FLAGS.log_root, "train")
+  if FLAGS.coverage:
+    ckpt_base_path = os.path.join(train_dir, "model.ckpt_cov")
+  else:
+    ckpt_base_path = os.path.join(train_dir, "model.ckpt")
+
+  while True:
+    if current_step is None:
+      ckpt_state = tf.train.get_checkpoint_state(train_dir)
+      if ckpt_state:
+        step = os.path.basename(ckpt_state.model_checkpoint_path).split('-')[-1]
+
+        if int(step) < FLAGS.start_eval_rouge:
+          tf.logging.info('Step = ' + str(step) + ' (smaller than start_eval_rouge, Sleeping for 10 secs...)')
+          time.sleep(10)
+          continue
+        else:
+          current_step = int(step)
+          current_ckpt_path = ckpt_base_path + '-' + str(current_step)
+      else:
+        tf.logging.info("Failed to load checkpoint from %s. Sleeping for %i secs...", train_dir, 10)
+        time.sleep(10)
+        continue
+    else:
+      current_step += FLAGS.save_model_every
+      current_ckpt_path = ckpt_base_path + '-' + str(current_step)
+      evaluator.init_batcher()
+
+    tf.logging.info('max_enc_steps: %d, max_dec_steps: %d', FLAGS.max_enc_steps, FLAGS.max_dec_steps)
+    do_eval = evaluator.prepare_evaluate(ckpt_path=current_ckpt_path)
+    if not do_eval:  # The checkpoint has already been evaluated. Evaluate next one.
+      tf.logging.info('step %d checkpoint has already been evaluated, evaluate next checkpoint.', current_step)
+      continue
+    rouge_results, rouge_results_str = evaluator.evaluate()
+
+    # print the loss and coverage loss to screen
+    results_file = os.path.join(eval_dir, "ROUGE_results_all.txt")
+    with open(results_file, "a") as f:
+      f.write('Step: ' + str(current_step))
+      f.write(rouge_results_str + '\n')
+
+    # add summaries
+    write_to_summary(rouge_results['1'], 'rouge_results/rouge1', current_step, summary_writer)
+    write_to_summary(rouge_results['2'], 'rouge_results/rouge2', current_step, summary_writer)
+    write_to_summary(rouge_results['l'], 'rouge_results/rougeL', current_step, summary_writer)
+
+    # If running_avg_loss is best so far, save this checkpoint (early stopping).
+    # These checkpoints will appear as bestmodel-<iteration_number> in the eval dir
+    better_metric = 0
+    if best_rouge1 is None or rouge_results['1'] > best_rouge1:
+      best_rouge1 = rouge_results['1']
+      better_metric += 1
+    if best_rouge2 is None or rouge_results['2'] > best_rouge2:
+      best_rouge2 = rouge_results['2']
+      better_metric += 1
+    if best_rougeL is None or rouge_results['l'] > best_rougeL:
+      best_rougeL = rouge_results['l']
+      better_metric += 1
+
+    if better_metric >= 2:
+      tf.logging.info('Found new best model with rouge1 %f, rouge2 %f, rougeL %f. Saving to %s', rouge_results['1'], rouge_results['2'], rouge_results['l'], bestmodel_save_path)
+      evaluator._saver.save(evaluator._sess, bestmodel_save_path, global_step=current_step, latest_filename='checkpoint_best')
+      rouge_results['step'] = current_step
+      with open(best_rouge_file, 'wb') as f:
+        pk.dump(rouge_results, f)
+
+    # flush the summary writer every so often
+    if current_step % 100 == 0:
+      summary_writer.flush()
