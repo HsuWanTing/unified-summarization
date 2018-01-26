@@ -199,7 +199,7 @@ def main(unused_argv):
       model = Rewriter(hps, vocab)
       if FLAGS.eval_method == 'loss':
         run_rewriter.run_eval(model, batcher)
-      else:
+      elif FLAGS.eval_method == 'rouge':
         assert FLAGS.decode_parallel == False and FLAGS.decode_method == 'greedy'
         decoder = BeamSearchDecoder(model, batcher, vocab)
         run_rewriter.run_eval_rouge(decoder)

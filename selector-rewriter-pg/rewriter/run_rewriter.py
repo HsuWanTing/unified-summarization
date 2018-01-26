@@ -21,6 +21,7 @@ import time
 import os
 import tensorflow as tf
 import numpy as np
+import cPickle as pk
 import util
 import pdb
 
@@ -71,7 +72,9 @@ def convert_to_coverage_model():
   print "restored."
 
   # save this model and quit
-  new_fname = curr_ckpt + '-cov-init'
+  ckpt_path = os.path.join(FLAGS.log_root, "train", "model.ckpt_cov")
+  step = curr_ckpt.split('-')[1]
+  new_fname = ckpt_path + '-' + step + '-init'
   print "saving model to %s..." % (new_fname)
   new_saver = tf.train.Saver() # this one will save all variables that now exist
   new_saver.save(sess, new_fname)
@@ -257,7 +260,7 @@ def run_eval_rouge(evaluator):
     if current_step is None:
       ckpt_state = tf.train.get_checkpoint_state(train_dir)
       if ckpt_state:
-        step = os.path.basename(ckpt_state.model_checkpoint_path).split('-')[-1]
+        step = os.path.basename(ckpt_state.model_checkpoint_path).split('-')[1]
 
         if int(step) < FLAGS.start_eval_rouge:
           tf.logging.info('Step = ' + str(step) + ' (smaller than start_eval_rouge, Sleeping for 10 secs...)')

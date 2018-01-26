@@ -48,7 +48,9 @@ def convert_to_coverage_model():
   print "restored."
 
   # save this model and quit
-  new_fname = curr_ckpt + '-cov-init'
+  ckpt_path = os.path.join(FLAGS.log_root, "train", "model.ckpt_cov")
+  step = curr_ckpt.split('-')[1]
+  new_fname = ckpt_path + '-' + step + '-init'
   print "saving model to %s..." % (new_fname)
   new_saver = tf.train.Saver() # this one will save all variables that now exist
   new_saver.save(sess, new_fname)
@@ -70,7 +72,7 @@ def setup_training(model, batcher):
     if FLAGS.pretrained_selector_path and FLAGS.pretrained_rewriter_path:
       params = tf.global_variables()
       selector_vars = [param for param in params if "SentSelector" in param.name and 'Adagrad' not in param.name]
-      if 'pg' in FLAGS.pretrained_selector_path:
+      if FLAGS.selector_loss_in_end2end and FLAGS.loss == 'PG':
         selector_vars += [param for param in params if 'running_avg_reward' in param.name]
       rewriter_vars = [param for param in params if "seq2seq" in param.name and 'Adagrad' not in param.name]
       uninitialized_vars = [param for param in params if param not in selector_vars and param not in rewriter_vars]
@@ -319,7 +321,7 @@ def run_eval_rouge(evaluator):
     if current_step is None:
       ckpt_state = tf.train.get_checkpoint_state(train_dir)
       if ckpt_state:
-        step = os.path.basename(ckpt_state.model_checkpoint_path).split('-')[-1]
+        step = os.path.basename(ckpt_state.model_checkpoint_path).split('-')[1]
 
         if int(step) < FLAGS.start_eval_rouge:
           tf.logging.info('Step = ' + str(step) + ' (smaller than start_eval_rouge, Sleeping for 10 secs...)')
