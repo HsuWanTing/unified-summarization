@@ -50,7 +50,7 @@ class Example(object):
       start_decoding = vocab.word2id(data.START_DECODING)
       stop_decoding = vocab.word2id(data.STOP_DECODING)
 
-      if hps.mode == 'rewriter':
+      if hps.model == 'rewriter':
         # Process the extracted sentences
         extract_sentences = [article_sentences[idx] for idx in extract_ids]
         enc_input_words = ' '.join(extract_sentences).split()

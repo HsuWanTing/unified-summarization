@@ -104,36 +104,40 @@ def attention_decoder_one_step(decoder_input, prev_state, encoder_states, enc_pa
 
           # If end2end, multiply the selector sentence probability with attnention probability
           if selector_probs is not None:
+            attn_dist_norescale = attn_dist * enc_padding_mask # apply mask, attention probabilities of pad tokens will be 0
+            masked_sums = tf.reduce_sum(attn_dist_norescale, axis=1, keep_dims=True) # shape (batch_size)
+            attn_dist_norescale = attn_dist_norescale / masked_sums
+
             batch_nums = tf.expand_dims(tf.range(0, limit=batch_size), 1) # shape (batch_size, 1)
             batch_nums_tile = tf.tile(batch_nums, [1, attn_len]) # shape (batch_size, attn_len)
             indices = tf.stack( (batch_nums_tile, enc_sent_id_mask), axis=2) # shape (batch_size, attn_len, 2)
             # All pad tokens will get probability of 0.0 since the sentence id is -1 (gather_nd will produce 0.0 for invalid indices)
             selector_probs_projected = tf.gather_nd(selector_probs, indices) # shape (batch_size, attn_len)
-            attn_dist *=  selector_probs_projected # shape (batch_size, attn_len)
-          
-          attn_dist *= enc_padding_mask # apply mask, attention probabilities of pad tokens will be 0
-          masked_sums = tf.reduce_sum(attn_dist, axis=1, keep_dims=True) # shape (batch_size)
-          return attn_dist / masked_sums # re-normalize
+            attn_dist *= selector_probs_projected # shape (batch_size, attn_len) 
+            attn_dist *= enc_padding_mask
+            masked_sums = tf.reduce_sum(attn_dist, axis=1, keep_dims=True) # shape (batch_size, 1)
+            attn_dist = attn_dist / masked_sums  # re-normalize
+            return attn_dist_norescale, attn_dist
+          else:
+            attn_dist *= enc_padding_mask # apply mask, attention probabilities of pad tokens will be 0
+            masked_sums = tf.reduce_sum(attn_dist, axis=1, keep_dims=True) # shape (batch_size, 1)
+            attn_dist = attn_dist / masked_sums  # re-normalize
+            return None, attn_dist
 
         if use_coverage and coverage is not None: # non-first step of coverage
           # Multiply coverage vector by w_c to get coverage_features.
           coverage_features = nn_ops.conv2d(coverage, w_c, [1, 1, 1, 1], "SAME") # c has shape (batch_size, attn_length, 1, attention_vec_size)
-
           # Calculate v^T tanh(W_h h_i + W_s s_t + w_c c_i^t + b_attn)
           e = math_ops.reduce_sum(v * math_ops.tanh(encoder_features + decoder_features + coverage_features), [2, 3])  # shape (batch_size,attn_length)
-
-		  # Calculate attention distribution
-          attn_dist = masked_attention(e)
-
+          # Calculate attention distribution
+          attn_dist_norescale, attn_dist = masked_attention(e)
           # Update coverage vector
           coverage += array_ops.reshape(attn_dist, [batch_size, -1, 1, 1])
         else:
           # Calculate v^T tanh(W_h h_i + W_s s_t + b_attn)
           e = math_ops.reduce_sum(v * math_ops.tanh(encoder_features + decoder_features), [2, 3]) # calculate e
-
-		  # Calculate attention distribution
-          attn_dist = masked_attention(e)
-
+          # Calculate attention distribution
+          attn_dist_norescale, attn_dist = masked_attention(e)
           if use_coverage: # first step of training
             coverage = tf.expand_dims(tf.expand_dims(attn_dist,2),2) # initialize coverage
 
@@ -141,7 +145,7 @@ def attention_decoder_one_step(decoder_input, prev_state, encoder_states, enc_pa
         context_vector = math_ops.reduce_sum(array_ops.reshape(attn_dist, [batch_size, -1, 1, 1]) * encoder_states, [1, 2]) # shape (batch_size, attn_size).
         context_vector = array_ops.reshape(context_vector, [-1, attn_size])
 
-      return context_vector, attn_dist, coverage
+      return context_vector, attn_dist_norescale, attn_dist, coverage
 
     
     if prev_context == None:
@@ -158,7 +162,7 @@ def attention_decoder_one_step(decoder_input, prev_state, encoder_states, enc_pa
     cell_output, state = cell(x, prev_state)
 
     # Run the attention mechanism.
-    context_vector, attn_dist, coverage = attention(state, prev_coverage)
+    context_vector, attn_dist_norescale, attn_dist, coverage = attention(state, prev_coverage)
 
     # Calculate p_gen
     if pointer_gen:
@@ -175,7 +179,7 @@ def attention_decoder_one_step(decoder_input, prev_state, encoder_states, enc_pa
     if coverage is not None:
       coverage = array_ops.reshape(coverage, [batch_size, -1])
 
-    return output, state, attn_dist, context_vector, p_gen, coverage
+    return output, state, attn_dist_norescale, attn_dist, context_vector, p_gen, coverage
 
 
 

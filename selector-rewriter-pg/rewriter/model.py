@@ -177,7 +177,7 @@ class Rewriter(object):
       selector_probs = None
       enc_sent_id_mask = None
 
-    output, out_state, attn_dist, context_vector, p_gen, coverage = attention_decoder_one_step(\
+    output, out_state, attn_dist_norescale, attn_dist, context_vector, p_gen, coverage = attention_decoder_one_step(\
                                                 inputs, self._dec_out_state, self._enc_states, \
                                                 self._enc_padding_mask, cell, \
                                                 prev_context=prev_context, \
@@ -187,7 +187,7 @@ class Rewriter(object):
                                                 selector_probs=selector_probs, \
                                                 enc_sent_id_mask=enc_sent_id_mask)
 
-    return output, out_state, attn_dist, context_vector, p_gen, coverage
+    return output, out_state, attn_dist_norescale, attn_dist, context_vector, p_gen, coverage
 
   def _add_decoder(self, dec_inputs, reuse=False):
     '''Add decoder with max_dec_steps for train and eval mode, 1 step for decode mode.'''
@@ -196,6 +196,7 @@ class Rewriter(object):
     dec_steps = hps.max_dec_steps
 
     with tf.variable_scope('decoder'):
+      attn_dists_norescale = []
       attn_dists = []
       p_gens = []
       vocab_scores = []
@@ -235,9 +236,10 @@ class Rewriter(object):
         # run one decoder step          #
         #################################
         inp_emb = tf.nn.embedding_lookup(self.embedding, inp) # (batch_size, emb_size)
-        decoder_output, self._dec_out_state, attn_dist, self.context_vector, p_gen, self.coverage = \
+        decoder_output, self._dec_out_state, attn_dist_norescale, attn_dist, self.context_vector, p_gen, self.coverage = \
                                                     self._add_decoder_one_step(inp_emb)
 
+        attn_dists_norescale.append(attn_dist_norescale)
         attn_dists.append(attn_dist) # coverage loss need this
         p_gens.append(p_gen) # for summary
 
@@ -273,7 +275,7 @@ class Rewriter(object):
     if self._graph_mode == 'greedy_search':
       return tf.stack(predict_words, axis=1)  # shape (batch_size, max_dec_steps)
     else:
-      return vocab_scores, log_dists, attn_dists, p_gens
+      return vocab_scores, log_dists, attn_dists_norescale, attn_dists, p_gens
 
 
   def _calc_final_dist_one_step(self, vocab_dist, attn_dist, p_gen):
@@ -379,7 +381,7 @@ class Rewriter(object):
       if self._graph_mode == 'greedy_search':
         self.greedy_search_words = self._add_decoder(dec_inputs=None)
       else:
-        vocab_scores, log_dists, self.attn_dists, self.p_gens = self._add_decoder(dec_inputs)
+        vocab_scores, log_dists, self.attn_dists_norescale, self.attn_dists, self.p_gens = self._add_decoder(dec_inputs)
 
       ################################################
       # Calculate the loss for train and eval mode   #
@@ -569,10 +571,6 @@ class Rewriter(object):
         self.prev_context: np.stack(prev_context, axis=0)
     }
 
-    if self._hps.model == 'end2end':
-      feed[self._selector_probs] = selector_probs
-      feed[self._enc_sent_id_mask] = batch.enc_sent_id_mask
-
     to_return = {
       "ids": self._topk_ids,
       "probs": self._topk_log_probs,
@@ -589,6 +587,11 @@ class Rewriter(object):
     if self._hps.coverage:
       feed[self.prev_coverage] = np.stack(prev_coverage, axis=0)
       to_return['coverage'] = self.coverage
+
+    if self._hps.model == 'end2end':
+      feed[self._selector_probs] = selector_probs
+      feed[self._enc_sent_id_mask] = batch.enc_sent_id_mask
+      to_return['attn_dists_norescale'] = self.attn_dists_norescale
 
     results = sess.run(to_return, feed_dict=feed) # run the decoder step
 
@@ -612,7 +615,12 @@ class Rewriter(object):
     else:
       new_coverage = [None for _ in xrange(beam_size)]
 
-    return results['ids'], results['probs'], new_states, attn_dists, new_context, p_gens, new_coverage
+    if self._hps.model == 'end2end':
+      attn_dists_norescale = results['attn_dists_norescale'][0].tolist()
+    else:
+      attn_dists_norescale = None
+
+    return results['ids'], results['probs'], new_states, attn_dists_norescale, attn_dists, new_context, p_gens, new_coverage
 
 
 def _mask_and_avg(values, padding_mask):

@@ -25,7 +25,7 @@ FLAGS = tf.app.flags.FLAGS
 class Hypothesis(object):
   """Class to represent a hypothesis during beam search. Holds all the information needed for the hypothesis."""
 
-  def __init__(self, tokens, log_probs, state, attn_dists, p_gens, context_vector, coverage):
+  def __init__(self, tokens, log_probs, state, attn_dists_norescale, attn_dists, p_gens, context_vector, coverage):
     """Hypothesis constructor.
 
     Args:
@@ -39,12 +39,13 @@ class Hypothesis(object):
     self.tokens = tokens
     self.log_probs = log_probs
     self.state = state
+    self.attn_dists_norescale = attn_dists_norescale
     self.attn_dists = attn_dists
     self.p_gens = p_gens
     self.context_vector = context_vector
     self.coverage = coverage
 
-  def extend(self, token, log_prob, state, attn_dist, p_gen, context_vector, coverage):
+  def extend(self, token, log_prob, state, attn_dist_norescale, attn_dist, p_gen, context_vector, coverage):
     """Return a NEW hypothesis, extended with the information from the latest step of beam search.
 
     Args:
@@ -60,6 +61,7 @@ class Hypothesis(object):
     return Hypothesis(tokens = self.tokens + [token],
                       log_probs = self.log_probs + [log_prob],
                       state = state,
+                      attn_dists_norescale = self.attn_dists_norescale + [attn_dist_norescale],
                       attn_dists = self.attn_dists + [attn_dist],
                       p_gens = self.p_gens + [p_gen],
                       context_vector = context_vector,
@@ -103,6 +105,7 @@ def run_beam_search(sess, model, vocab, batch):
   hyps = [Hypothesis(tokens=[vocab.word2id(data.START_DECODING)],   # first token is the start token
                      log_probs=[0.0],   # first probability is 1.0 (start token)
                      state=dec_in_state,
+                     attn_dists_norescale=[],
                      attn_dists=[],
                      p_gens=[],
                      context_vector=np.zeros([enc_states.shape[2]]),
@@ -119,7 +122,7 @@ def run_beam_search(sess, model, vocab, batch):
     prev_context = [h.context_vector for h in hyps]
 
     # Run one step of the decoder to get the new info
-    (topk_ids, topk_log_probs, new_states, attn_dists, new_context, p_gens, new_coverage) = \
+    (topk_ids, topk_log_probs, new_states, attn_dists_norescale, attn_dists, new_context, p_gens, new_coverage) = \
                         model._rewriter.decode_onestep(sess=sess,
                                              batch=batch,
                                              latest_tokens=latest_tokens,
@@ -133,12 +136,13 @@ def run_beam_search(sess, model, vocab, batch):
     all_hyps = []
     num_orig_hyps = 1 if steps == 0 else len(hyps) # On the first step, we only had one original hypothesis (the initial hypothesis). On subsequent steps, all original hypotheses are distinct.
     for i in xrange(num_orig_hyps):
-      h, new_state, attn_dist, new_context_i, p_gen, new_coverage_i = hyps[i], new_states[i], attn_dists[i], new_context[i], p_gens[i], new_coverage[i]  # take the ith hypothesis and new decoder state info
+      h, new_state, attn_dist_norescale, attn_dist, new_context_i, p_gen, new_coverage_i = hyps[i], new_states[i], attn_dists_norescale[i], attn_dists[i], new_context[i], p_gens[i], new_coverage[i]  # take the ith hypothesis and new decoder state info
       for j in xrange(FLAGS.beam_size * 2):  # for each of the top 2*beam_size hyps:
         # Extend the ith hypothesis with the jth option
         new_hyp = h.extend(token=topk_ids[i, j],
                            log_prob=topk_log_probs[i, j],
                            state=new_state,
+                           attn_dist_norescale=attn_dist_norescale,
                            attn_dist=attn_dist,
                            p_gen=p_gen,
                            context_vector=new_context_i,

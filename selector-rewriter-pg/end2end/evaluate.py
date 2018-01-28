@@ -127,7 +127,7 @@ class End2EndEvaluator(object):
           self.process_one_article(batch.original_articles_sents[i], batch.original_abstracts_sents[i], \
                                    batch.original_extracts_ids[i], output_ids[i], \
                                    (batch.art_oovs[i] if FLAGS.pointer_gen else None), \
-                                   None, None, None, None, counter)
+                                   None, None, None, None, None, counter)
           counter += 1
       else:
         # Get sentence probabilities from selector
@@ -141,13 +141,13 @@ class End2EndEvaluator(object):
         best_hyp.log_probs = best_hyp.log_probs[1:]   # remove start token probability
         self.process_one_article(batch.original_articles_sents[0], batch.original_abstracts_sents[0], \
                                  batch.original_extracts_ids[0], output_ids, \
-                                 (batch.art_oovs[0] if FLAGS.pointer_gen else None), \
+                                 (batch.art_oovs[0] if FLAGS.pointer_gen else None), best_hyp.attn_dists_norescale,\
                                  best_hyp.attn_dists, best_hyp.p_gens, best_hyp.log_probs, sent_probs, counter)
         counter += 1
 
  
   def process_one_article(self, original_article_sents, original_abstract_sents, \
-                          original_selected_ids, output_ids, oovs, \
+                          original_selected_ids, output_ids, oovs, attn_dists_norescale, \
                           attn_dists, p_gens, log_probs, sent_probs, counter):
     # Remove the [STOP] token from decoded_words, if necessary
     decoded_words = data.outputids2words(output_ids, self._vocab, oovs)
@@ -175,7 +175,7 @@ class End2EndEvaluator(object):
         original_abstract = ' '.join(original_abstract_sents)
         article_withunks = data.show_art_oovs(original_article, self._vocab) # string
         abstract_withunks = data.show_abs_oovs(original_abstract, self._vocab, oovs)
-        self.write_for_attnvis(article_withunks, abstract_withunks, decoded_words, \
+        self.write_for_attnvis(article_withunks, abstract_withunks, decoded_words, attn_dists_norescale, \
                                attn_dists, p_gens, log_probs, sent_probs_per_word, counter, verbose)
       if FLAGS.save_pkl:
         self.save_result(original_article_sents, original_abstract_sents, \
@@ -221,7 +221,7 @@ class End2EndEvaluator(object):
       tf.logging.info("Wrote example %i to file" % ex_index)
 
 
-  def write_for_attnvis(self, article, abstract, decoded_words, attn_dists, p_gens, log_probs, \
+  def write_for_attnvis(self, article, abstract, decoded_words, attn_dists_norescale, attn_dists, p_gens, log_probs, \
                         sent_probs, count=None, verbose=False):
     """Write some data to json file, which can be read into the in-browser attention visualizer tool:
       https://github.com/abisee/attn_vis
@@ -239,6 +239,7 @@ class End2EndEvaluator(object):
         'article_lst': [make_html_safe(t) for t in article_lst],
         'decoded_lst': [make_html_safe(t) for t in decoded_lst],
         'abstract_str': make_html_safe(abstract),
+        'attn_dists_norescale': attn_dists_norescale,
         'attn_dists': attn_dists,
         'probs': np.exp(log_probs).tolist(),
         'sent_probs': sent_probs

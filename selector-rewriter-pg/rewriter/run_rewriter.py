@@ -299,13 +299,13 @@ def run_eval_rouge(evaluator):
     # If running_avg_loss is best so far, save this checkpoint (early stopping).
     # These checkpoints will appear as bestmodel-<iteration_number> in the eval dir
     better_metric = 0
-    if best_rouge1 is None or rouge_results['1'] > best_rouge1:
+    if best_rouge1 is None or rouge_results['1'] >= best_rouge1:
       best_rouge1 = rouge_results['1']
       better_metric += 1
-    if best_rouge2 is None or rouge_results['2'] > best_rouge2:
+    if best_rouge2 is None or rouge_results['2'] >= best_rouge2:
       best_rouge2 = rouge_results['2']
       better_metric += 1
-    if best_rougeL is None or rouge_results['l'] > best_rougeL:
+    if best_rougeL is None or rouge_results['l'] >= best_rougeL:
       best_rougeL = rouge_results['l']
       better_metric += 1
 

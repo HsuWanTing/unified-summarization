@@ -151,12 +151,12 @@ class BeamSearchDecoder(object):
         self.process_one_article(batch.original_articles_sents[0], batch.original_abstracts_sents[0], \
                                  batch.original_extracts_ids[0], output_ids, \
                                  (batch.art_oovs[0] if FLAGS.pointer_gen else None), \
-                                 best_hyp.attn_dists, best_hyp.p_gens, best_hyp.log_probs, sent_probs, counter)
+                                 best_hyp.attn_dists, best_hyp.p_gens, best_hyp.log_probs, counter)
         counter += 1
 
   def process_one_article(self, original_article_sents, original_abstract_sents, \
                           original_selected_ids, output_ids, oovs, \
-                          attn_dists, p_gens, log_probs, sent_probs, counter):
+                          attn_dists, p_gens, log_probs, counter):
     # Remove the [STOP] token from decoded_words, if necessary
     decoded_words = data.outputids2words(output_ids, self._vocab, oovs)
     try:
