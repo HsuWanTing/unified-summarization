@@ -275,6 +275,10 @@ def run_eval_rouge(evaluator):
         continue
     else:
       current_step += FLAGS.save_model_every
+      if int(current_step) < FLAGS.start_eval_rouge:
+        tf.logging.info('Step = ' + str(current_step) + ' (smaller than start_eval_rouge, Sleeping for 10 secs...)')
+        time.sleep(10)
+        continue
       current_ckpt_path = ckpt_base_path + '-' + str(current_step)
       evaluator.init_batcher()
 

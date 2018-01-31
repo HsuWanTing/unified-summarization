@@ -109,8 +109,12 @@ class Rewriter(object):
         Each are LSTMStateTuples of shape ([batch_size,hidden_dim],[batch_size,hidden_dim])
     """
     with tf.variable_scope('encoder'):
-      cell_fw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim_rewriter, initializer=self.rand_unif_init, state_is_tuple=True)
-      cell_bw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim_rewriter, initializer=self.rand_unif_init, state_is_tuple=True)
+      if self._hps.layernorm:
+        cell_fw = tf.contrib.rnn.LayerNormBasicLSTMCell(self._hps.hidden_dim_rewriter)
+        cell_bw = tf.contrib.rnn.LayerNormBasicLSTMCell(self._hps.hidden_dim_rewriter)
+      else:
+        cell_fw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim_rewriter, initializer=self.rand_unif_init, state_is_tuple=True)
+        cell_bw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim_rewriter, initializer=self.rand_unif_init, state_is_tuple=True)
       (encoder_outputs, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
       encoder_outputs = tf.concat(axis=2, values=encoder_outputs) # concatenate the forwards and backwards states
     return encoder_outputs, fw_st, bw_st

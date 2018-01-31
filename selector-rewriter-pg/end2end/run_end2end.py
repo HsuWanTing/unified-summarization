@@ -71,10 +71,10 @@ def setup_training(model, batcher):
 
     if FLAGS.pretrained_selector_path and FLAGS.pretrained_rewriter_path:
       params = tf.global_variables()
-      selector_vars = [param for param in params if "SentSelector" in param.name and 'Adagrad' not in param.name]
+      selector_vars = [param for param in params if "SentSelector" in param.name and 'Adagrad' not in param.name and 'Adam' not in param.name]
       if FLAGS.selector_loss_in_end2end and FLAGS.loss == 'PG':
         selector_vars += [param for param in params if 'running_avg_reward' in param.name]
-      rewriter_vars = [param for param in params if "seq2seq" in param.name and 'Adagrad' not in param.name]
+      rewriter_vars = [param for param in params if "seq2seq" in param.name and 'Adagrad' not in param.name and 'Adam' not in param.name]
       uninitialized_vars = [param for param in params if param not in selector_vars and param not in rewriter_vars]
       selector_saver = tf.train.Saver(selector_vars)
       rewriter_saver = tf.train.Saver(rewriter_vars)
@@ -158,6 +158,9 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer, \
 
       if FLAGS.coverage:
         tf.logging.info("coverage_loss: %f", results['coverage_loss']) # print the coverage loss to screen
+
+      if FLAGS.inconsistent_loss:
+        tf.logging.info('inconsistent_loss: %f', results['inconsist_loss'])
 
       if FLAGS.selector_loss_in_end2end:
         tf.logging.info("selector_loss: %f", results['selector_loss'])
@@ -336,6 +339,10 @@ def run_eval_rouge(evaluator):
         continue
     else:
       current_step += FLAGS.save_model_every
+      if int(current_step) < FLAGS.start_eval_rouge:
+        tf.logging.info('Step = ' + str(current_step) + ' (smaller than start_eval_rouge, Sleeping for 10 secs...)')
+        time.sleep(10)
+        continue
       current_ckpt_path = ckpt_base_path + '-' + str(current_step)
       evaluator.init_batcher()
 

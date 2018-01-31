@@ -249,6 +249,7 @@ class SentenceSelector(object):
       # Add the classifier.                  #
       ########################################
       logits, self.probs = self._add_classifier(sent_feats, art_feats) # (batch_size, max_art_len)
+      self.probs = self.probs * self._art_padding_mask
 
       ################################################
       # Calculate the loss                           #
@@ -275,14 +276,14 @@ class SentenceSelector(object):
 
   def _focal_loss(self, probs, targets, gamma=2.0):
     class_probs = tf.where(tf.equal(targets, 1), probs, 1.0 - probs) # (batch_size, max_art_len)
-    losses = -tf.pow(1. - class_probs, gamma) * tf.log(class_probs + 1e-8) # (batch_size, max_art_len)
+    losses = -tf.pow(1. - class_probs, gamma) * tf.log(class_probs + sys.float_info.epsilon) # (batch_size, max_art_len)
     return losses
 
   def _surrogate_loss(self, probs):
     hps = self._hps
     # produce not select probs and select probs
     dists = tf.stack([1.0 - probs, probs], 2)  # (batch_size, max_art_len, 2)
-    log_dists = tf.log(dists + 1e-8)  # to avoid NaN after log, shape (batch_size, max_art_len, 2)
+    log_dists = tf.log(dists + sys.float_info.epsilon)  # to avoid NaN after log, shape (batch_size, max_art_len, 2)
     log_dists_flatten = tf.reshape(log_dists, [-1, 2])  # (batch_size*max_art_len, 2)
 
     # Get argmax actions

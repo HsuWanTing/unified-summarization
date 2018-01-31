@@ -14,6 +14,50 @@ class SelectorRewriter(object):
     self._selector = select_model
     self._rewriter = rewrite_model
 
+  def _add_inconsistent_loss(self):
+    hps = self._hps
+    enc_len = tf.shape(self._rewriter._enc_sent_id_mask)[1]
+
+    batch_nums = tf.expand_dims(tf.range(0, limit=hps.batch_size), 1) # shape (batch_size, 1)
+    batch_nums_tile = tf.tile(batch_nums, [1, enc_len]) # shape (batch_size, enc_len)
+    indices = tf.stack( (batch_nums_tile, self._rewriter._enc_sent_id_mask), axis=2) # shape (batch_size, enc_len, 2)
+    # All pad tokens will get probability of 0.0 since the sentence id is -1 (gather_nd will produce 0.0 for invalid indices)
+    selector_probs_projected = tf.gather_nd(self._selector.probs, indices) # shape (batch_size, enc_len)
+
+    if hps.inconsistent_thres == 'avg':
+      prob_thres = tf.reduce_mean(tf.reduce_sum(self._selector.probs, 1) / tf.reduce_sum(self._selector._art_padding_mask, 1))
+    else:
+      prob_thres = hps.inconsistent_thres
+
+    #low_prob_mask = tf.cast(tf.less(selector_probs_projected, prob_thres), tf.float32)  # shape (batch_size, enc_len)
+    losses = []
+    # To produce inconsistent loss = -log((1 - sent_prob)*(1 - word_attn))
+    for dec_step, attn_dist in enumerate(self._rewriter.attn_dists_norescale):
+      max_w_id = tf.expand_dims(tf.argmax(attn_dist, axis=1), 1)  # shape (batch_size, 1)
+      max_w_id = tf.cast(max_w_id, tf.int32)  # shape (batch_size, 1)
+      max_w_indices = tf.concat((batch_nums, max_w_id), axis=1)  # shape (batch_size, 2)
+      max_w = tf.gather_nd(attn_dist, max_w_indices)  # shape (batch_size,)
+      s = tf.gather_nd(selector_probs_projected, max_w_indices)  # shape (batch_size,)
+      losses_one_step = max_w * s  # shape (batch_size,)
+
+
+      #losses_one_step = (1 - selector_probs_projected) * (1 - attn_dist) + selector_probs_projected * attn_dist  # shape (batch_size, enc_len)
+      #losses_one_step = (1 - selector_probs_projected) * (1 - attn_dist)  # shape (batch_size, enc_len)
+      #losses_one_step = (1 - attn_dist)  # shape (batch_size, enc_len)
+      '''
+      low_prob_count = tf.reduce_sum(low_prob_mask, 1)  # shape (batch_size,)
+      low_prob_count = tf.where(tf.equal(low_prob_count, 0.0), tf.ones([hps.batch_size]), low_prob_count)  # shape (batch_size,)
+      losses_one_step = tf.reduce_sum(losses_one_step * low_prob_mask, 1) / low_prob_count  # shape (batch_size,)
+      '''
+      #losses_one_step = tf.reduce_sum(losses_one_step * self._rewriter._enc_padding_mask, 1) / tf.reduce_sum(self._rewriter._enc_padding_mask, 1)  # shape (batch_size,)
+
+      losses_one_step = -tf.log(losses_one_step + sys.float_info.epsilon)
+      losses_one_step *= self._rewriter._dec_padding_mask[:,dec_step]  # shape (batch_size,)
+      losses.append(losses_one_step)
+    loss = tf.reduce_mean(sum(losses)/tf.reduce_sum(self._rewriter._dec_padding_mask, axis=1))
+    return loss
+        
+
   def _add_train_op(self):
     """Sets self._train_op, the op to run for training."""
     hps = self._hps
@@ -24,6 +68,12 @@ class SelectorRewriter(object):
         loss_to_minimize += (self._selector._total_loss * hps.selector_loss_wt)
       else:
         loss_to_minimize += (self._selector._loss * hps.selector_loss_wt)
+
+    if hps.inconsistent_loss:
+      self._inconsistent_loss = self._add_inconsistent_loss()
+      tf.summary.scalar('inconsist_loss', self._inconsistent_loss)
+      loss_to_minimize += self._inconsistent_loss
+
     tvars = tf.trainable_variables()
     gradients = tf.gradients(loss_to_minimize, tvars, aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
 
@@ -35,7 +85,12 @@ class SelectorRewriter(object):
     tf.summary.scalar('global_norm', global_norm)
 
     # Apply adagrad optimizer
-    optimizer = tf.train.AdagradOptimizer(hps.lr, initial_accumulator_value=hps.adagrad_init_acc)
+    if hps.optim == 'adagrad':
+      tf.logging.info('Using Adagrad optimizer')
+      optimizer = tf.train.AdagradOptimizer(hps.lr, initial_accumulator_value=hps.adagrad_init_acc)
+    elif hps.optim == 'adam':
+      tf.logging.info('Using Adam optimizer')
+      optimizer = tf.train.AdamOptimizer()
     with tf.device("/gpu:0"):
       self._train_op = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step, name='train_step')
 
@@ -86,6 +141,8 @@ class SelectorRewriter(object):
     }
     if hps.coverage:
       to_return['coverage_loss'] = self._rewriter._coverage_loss
+    if hps.inconsistent_loss:
+      to_return['inconsist_loss'] = self._inconsistent_loss
     if hps.selector_loss_in_end2end:
       to_return['selector_loss'] = self._selector._loss
       if hps.loss == 'PG':
@@ -124,6 +181,9 @@ class SelectorRewriter(object):
     }
     if hps.coverage:
       to_return['coverage_loss'] = self._rewriter._coverage_loss
+
+    if hps.inconsistent_loss:
+      to_return['inconsist_loss'] = self._inconsistent_loss
 
     if hps.selector_loss_in_end2end:
       to_return['selector_loss'] = self._selector._loss

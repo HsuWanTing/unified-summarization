@@ -117,7 +117,7 @@ def run_beam_search(sess, model, vocab, batch):
     prev_context = [h.context_vector for h in hyps]
 
     # Run one step of the decoder to get the new info
-    (topk_ids, topk_log_probs, new_states, attn_dists, new_context, p_gens, new_coverage) = \
+    (topk_ids, topk_log_probs, new_states, _, attn_dists, new_context, p_gens, new_coverage) = \
                         model.decode_onestep(sess=sess,
                                              batch=batch,
                                              latest_tokens=latest_tokens,

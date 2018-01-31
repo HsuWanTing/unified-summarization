@@ -139,7 +139,7 @@ class BeamSearchDecoder(object):
           self.process_one_article(batch.original_articles_sents[i], batch.original_abstracts_sents[i], \
                                    batch.original_extracts_ids[i], output_ids[i], \
                                    (batch.art_oovs[i] if FLAGS.pointer_gen else None), \
-                                   None, None, None, None, counter)
+                                   None, None, None, counter)
           counter += 1
       else:
         # Run beam search to get best Hypothesis
