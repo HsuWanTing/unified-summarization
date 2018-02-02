@@ -62,6 +62,7 @@ class Example(object):
           sent_words = sent.split()
           for _ in range(len(sent_words)):
             if len(self.enc_input_sent_ids) < hps.max_enc_steps:
+              self.art_len = idx + 1
               self.enc_input_sent_ids.append(idx)
       
       if len(enc_input_words) > hps.max_enc_steps:
@@ -91,9 +92,14 @@ class Example(object):
 
     if hps.model in ['selector', 'end2end']:
       # Process the article
-      if len(article_sentences) > hps.max_art_len:
-        article_sentences = article_sentences[:hps.max_art_len]
-      self.art_len = len(article_sentences) # store the length after truncation but before padding
+      if hps.model == 'selector':
+        if len(article_sentences) > hps.max_art_len:
+          article_sentences = article_sentences[:hps.max_art_len]
+        self.art_len = len(article_sentences) # store the length after truncation but before padding
+      elif hps.model == 'end2end':
+        if self.art_len > hps.max_art_len:
+          self.art_len = hps.max_art_len
+        article_sentences = article_sentences[:self.art_len]
 
       self.art_ids = []
       self.sent_lens = []

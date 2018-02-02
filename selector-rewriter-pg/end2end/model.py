@@ -19,41 +19,45 @@ class SelectorRewriter(object):
     enc_len = tf.shape(self._rewriter._enc_sent_id_mask)[1]
 
     batch_nums = tf.expand_dims(tf.range(0, limit=hps.batch_size), 1) # shape (batch_size, 1)
-    batch_nums_tile = tf.tile(batch_nums, [1, enc_len]) # shape (batch_size, enc_len)
-    indices = tf.stack( (batch_nums_tile, self._rewriter._enc_sent_id_mask), axis=2) # shape (batch_size, enc_len, 2)
+    indices = tf.stack((tf.tile(batch_nums, [1, enc_len]), self._rewriter._enc_sent_id_mask), axis=2) # shape (batch_size, enc_len, 2)
     # All pad tokens will get probability of 0.0 since the sentence id is -1 (gather_nd will produce 0.0 for invalid indices)
     selector_probs_projected = tf.gather_nd(self._selector.probs, indices) # shape (batch_size, enc_len)
 
+    '''
     if hps.inconsistent_thres == 'avg':
       prob_thres = tf.reduce_mean(tf.reduce_sum(self._selector.probs, 1) / tf.reduce_sum(self._selector._art_padding_mask, 1))
     else:
       prob_thres = hps.inconsistent_thres
+    '''
 
-    #low_prob_mask = tf.cast(tf.less(selector_probs_projected, prob_thres), tf.float32)  # shape (batch_size, enc_len)
     losses = []
-    # To produce inconsistent loss = -log((1 - sent_prob)*(1 - word_attn))
+    batch_nums_tilek = tf.tile(batch_nums, [1, hps.inconsistent_topk]) # shape (batch_size, k)
+    # To compute inconsistent loss = -log((1 - sent_prob)*(1 - word_attn))
     for dec_step, attn_dist in enumerate(self._rewriter.attn_dists_norescale):
+      '''
       max_w_id = tf.expand_dims(tf.argmax(attn_dist, axis=1), 1)  # shape (batch_size, 1)
       max_w_id = tf.cast(max_w_id, tf.int32)  # shape (batch_size, 1)
       max_w_indices = tf.concat((batch_nums, max_w_id), axis=1)  # shape (batch_size, 2)
       max_w = tf.gather_nd(attn_dist, max_w_indices)  # shape (batch_size,)
       s = tf.gather_nd(selector_probs_projected, max_w_indices)  # shape (batch_size,)
-      losses_one_step = max_w * s  # shape (batch_size,)
-
-
-      #losses_one_step = (1 - selector_probs_projected) * (1 - attn_dist) + selector_probs_projected * attn_dist  # shape (batch_size, enc_len)
-      #losses_one_step = (1 - selector_probs_projected) * (1 - attn_dist)  # shape (batch_size, enc_len)
-      #losses_one_step = (1 - attn_dist)  # shape (batch_size, enc_len)
+      loss_one_step = max_w * s  # shape (batch_size,)
+      loss_one_step = -tf.log(loss_one_step + sys.float_info.epsilon)  # shape (batch_size,)
       '''
-      low_prob_count = tf.reduce_sum(low_prob_mask, 1)  # shape (batch_size,)
-      low_prob_count = tf.where(tf.equal(low_prob_count, 0.0), tf.ones([hps.batch_size]), low_prob_count)  # shape (batch_size,)
-      losses_one_step = tf.reduce_sum(losses_one_step * low_prob_mask, 1) / low_prob_count  # shape (batch_size,)
+      topk_w, topk_w_id = tf.nn.top_k(attn_dist, hps.inconsistent_topk)  # shape (batch_size, topk)
+      topk_w_indices = tf.stack((batch_nums_tilek, topk_w_id), axis=2)  # shape (batch_size, topk, 2)
+      topk_s = tf.gather_nd(selector_probs_projected, topk_w_indices)  # shape (batch_size, topk)
       '''
-      #losses_one_step = tf.reduce_sum(losses_one_step * self._rewriter._enc_padding_mask, 1) / tf.reduce_sum(self._rewriter._enc_padding_mask, 1)  # shape (batch_size,)
+      # log first than mean
+      loss_one_step = -tf.log((topk_w * topk_s) + sys.float_info.epsilon)  # shape (batch_size, topk)
+      loss_one_step = tf.reduce_mean(loss_one_step, 1)  # shape (batch_size,)
+      '''
+      # mean first than log
+      loss_one_step = tf.reduce_mean(topk_w * topk_s, 1)  # shape (batch_size,)
+      loss_one_step = -tf.log(loss_one_step + sys.float_info.epsilon)  # shape (batch_size,)
 
-      losses_one_step = -tf.log(losses_one_step + sys.float_info.epsilon)
-      losses_one_step *= self._rewriter._dec_padding_mask[:,dec_step]  # shape (batch_size,)
-      losses.append(losses_one_step)
+
+      loss_one_step *= self._rewriter._dec_padding_mask[:,dec_step]  # shape (batch_size,)
+      losses.append(loss_one_step)
     loss = tf.reduce_mean(sum(losses)/tf.reduce_sum(self._rewriter._dec_padding_mask, axis=1))
     return loss
         

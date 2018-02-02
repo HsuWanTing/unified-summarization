@@ -80,7 +80,8 @@ tf.app.flags.DEFINE_string('pretrained_rewriter_path', '', 'rewriter checkpoint 
 tf.app.flags.DEFINE_boolean('selector_loss_in_end2end', False, 'whether to minimize selector loss when end2end')
 tf.app.flags.DEFINE_float('selector_loss_wt', 1.0, 'weight of selector loss when end2end')
 tf.app.flags.DEFINE_boolean('inconsistent_loss', False, 'whether to minimize inconsistent loss when end2end')
-tf.app.flags.DEFINE_float('inconsistent_thres', 0.5, 'probability threshold for inconsistent loss')
+tf.app.flags.DEFINE_integer('inconsistent_topk', 1, 'choose top K word attention to compute inconsistent loss')
+#tf.app.flags.DEFINE_float('inconsistent_thres', 0.5, 'probability threshold for inconsistent loss')
 
 # Hyperparameters for both selector and rewriter
 tf.app.flags.DEFINE_integer('batch_size', 16, 'minibatch size')
@@ -170,7 +171,7 @@ def main(unused_argv):
     raise Exception("The single_pass flag should not be True in train mode")
 
   # Make a namedtuple hps, containing the values of the hyperparameters that the model needs
-  hparam_list = ['model', 'mode', 'eval_method', 'optim', 'layernorm', 'rnn_type', 'selector_loss_in_end2end', 'selector_loss_wt', 'inconsistent_loss', 'inconsistent_thres', 'loss', 'gamma', 'reward', 'regu_ratio', 'regu_ratio_wt', 'regu_l2_wt','lr', 'adagrad_init_acc', 'rand_unif_init_mag', 'trunc_norm_init_std', 'max_grad_norm', 'hidden_dim_selector', 'hidden_dim_rewriter','emb_dim', 'batch_size', 'max_art_len', 'max_sent_len', 'max_dec_steps', 'max_enc_steps', 'coverage', 'cov_loss_wt', 'pointer_gen', 'eval_gt_rouge', 'decode_method']
+  hparam_list = ['model', 'mode', 'eval_method', 'optim', 'layernorm', 'rnn_type', 'selector_loss_in_end2end', 'selector_loss_wt', 'inconsistent_loss', 'inconsistent_topk', 'loss', 'gamma', 'reward', 'regu_ratio', 'regu_ratio_wt', 'regu_l2_wt','lr', 'adagrad_init_acc', 'rand_unif_init_mag', 'trunc_norm_init_std', 'max_grad_norm', 'hidden_dim_selector', 'hidden_dim_rewriter','emb_dim', 'batch_size', 'max_art_len', 'max_sent_len', 'max_dec_steps', 'max_enc_steps', 'coverage', 'cov_loss_wt', 'pointer_gen', 'eval_gt_rouge', 'decode_method']
   hps_dict = {}
   for key,val in FLAGS.__flags.iteritems(): # for each flag
     if key in hparam_list: # if it's in the list

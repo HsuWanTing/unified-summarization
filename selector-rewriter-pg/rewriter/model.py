@@ -289,15 +289,6 @@ class Rewriter(object):
       attn_len = tf.shape(self._enc_batch_extend_vocab)[1] # number of states we attend over
       batch_nums_tile = tf.tile(batch_nums, [1, attn_len]) # shape (batch_size, attn_len)
 
-      '''
-      # If end2end, multiply the selector sentence probability with attnention probability
-      if self._hps.model == 'end2end':
-        indices = tf.stack( (batch_nums_tile, self._enc_sent_id_mask), axis=2) # shape (batch_size, attn_len, 2)
-        selector_probs_projected = tf.gather_nd(self._selector_probs, indices)
-        attn_dist = attn_dist * selector_probs_projected
-        attn_dist = attn_dist / tf.reduce_sum(attn_dist, axis=1, keep_dims=True)  # normalize the attnetion distribution
-      '''
-
       # Multiply vocab dists by p_gen and attention dists by (1-p_gen)
       vocab_dist = p_gen * vocab_dist
       attn_dist = (1-p_gen) * attn_dist
