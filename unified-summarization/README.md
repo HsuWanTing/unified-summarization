@@ -1,5 +1,8 @@
 # Unified Summarization
 
+This code is written in Tensorflow (version 1.1.0).
+
+
 ## CNN/Daily mail dataset
 
 Codes for generating the dataset is in `data_preprocess` folder.
