@@ -25,6 +25,8 @@ sh scripts/rewriter.sh
 
 ### End-to-end training
 
+Set the path of pretrained extractor and abstractor to `SELECTOR_PATH` and `REWRITER_PATH` in line 18 and 19.
+
 ```
 sh scripts/end2end.sh
 ```
