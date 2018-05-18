@@ -1,7 +1,14 @@
 # Unified Summarization
 
+This is the official codes for the paper: [A Unified Model for Extractive and Abstractive Summarization using Inconsistency Loss](https://arxiv.org/abs/1805.06266).
+
 This code is written in Tensorflow (version 1.1.0).
 
+## Requirements
+
+* Python 2.7
+* [Tensoflow 1.1.0](https://www.tensorflow.org/versions/r1.1/)
+* [Standford CoreNLP](https://stanfordnlp.github.io/CoreNLP/) (for data preprocessing)
 
 ## CNN/Daily Mail dataset
 
@@ -9,7 +16,7 @@ Codes for generating the dataset is in `data_preprocess` folder.
 
 We modified the preprocessing code from [this repository](https://github.com/abisee/cnn-dailymail).
 
-You can use our preprocessing codes ([data/make_datafiles.py](./data/make_datafiles.py) and [data/rouge_not_a_wrapper.py](./data/rouge_not_a_wrapper.py)) and follow their [Option 2](https://github.com/abisee/cnn-dailymail#option-2-process-the-data-yourself) to obtain the preprocessed data for our model.
+You can use our preprocessing codes ([data/make_datafiles.py](./data/make_datafiles.py) and [data/rouge_not_a_wrapper.py](./data/rouge_not_a_wrapper.py)) and follow their instrunctions of [Option 2](https://github.com/abisee/cnn-dailymail#option-2-process-the-data-yourself) to obtain the preprocessed data for our model.
 
 **Note**: Stanford CoreNLP 3.7.0 can be downloaded from [here](http://nlp.stanford.edu/software/stanford-corenlp-full-2016-10-31.zip). 
 
