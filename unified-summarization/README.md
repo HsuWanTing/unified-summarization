@@ -2,8 +2,6 @@
 
 This is the official codes for the paper: [A Unified Model for Extractive and Abstractive Summarization using Inconsistency Loss](https://arxiv.org/abs/1805.06266).
 
-This code is written in Tensorflow (version 1.1.0).
-
 ## Requirements
 
 * Python 2.7
@@ -12,7 +10,7 @@ This code is written in Tensorflow (version 1.1.0).
 
 ## CNN/Daily Mail dataset
 
-Codes for generating the dataset is in `data_preprocess` folder.
+Codes for generating the dataset is in `data` folder.
 
 We modified the preprocessing code from [this repository](https://github.com/abisee/cnn-dailymail).
 
