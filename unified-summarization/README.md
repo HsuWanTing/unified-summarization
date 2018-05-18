@@ -7,7 +7,9 @@ This code is written in Tensorflow (version 1.1.0).
 
 Codes for generating the dataset is in `data_preprocess` folder.
 
-The usage is same as https://github.com/abisee/cnn-dailymail
+We modified the preprocessing code from [this repository](https://github.com/abisee/cnn-dailymail).
+
+You can use our preprocessing codes ([data/make_datafiles.py](./data/make_datafiles.py) and [data/rouge_not_a_wrapper.py](./data/rouge_not_a_wrapper.py)) and follow their [option 2](https://github.com/abisee/cnn-dailymail#option-2-process-the-data-yourself) to obtain the preprocessed data for our model.
 
 
 ## How to train
