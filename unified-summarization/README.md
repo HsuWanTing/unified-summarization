@@ -67,3 +67,5 @@ The current best models will be saved in `log/${MODEL}/${YOUR_EXP_NAME}/eval_${D
 ## How to evaluate with ROUGE on test set
 
 Change the `MODE` in the script to `evalall` (i.e., `MODE='evalall'`) and set the `CKPT_PATH` as the model path that you want to test. 
+
+**Note**: To use ROUGE evaluation, you need to download the `ROUGE-1.5.5` package from [here](https://github.com/andersjo/pyrouge). Next, follow the instrunction from [here](https://pypi.org/project/pyrouge/) to install pyrouge and set the ROUGE path to your absolute path of `ROUGE-1.5.5` directory.
