@@ -8,6 +8,7 @@ This is the official codes for the paper: [A Unified Model for Extractive and Ab
 * [Tensoflow 1.1.0](https://www.tensorflow.org/versions/r1.1/)
 * [Standford CoreNLP](https://stanfordnlp.github.io/CoreNLP/) (for data preprocessing)
 * [NLTK](https://www.nltk.org/) (for data preprocessing)
+* matplotlib
 * tqdm
 
 ## CNN/Daily Mail dataset
