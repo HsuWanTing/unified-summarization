@@ -2,12 +2,11 @@ import os
 import sys
 import time
 import tensorflow as tf
-import pdb
 
 FLAGS = tf.app.flags.FLAGS
 
 class SelectorRewriter(object):
-  """A class to represent a sequence-to-sequence model for text summarization. Supports both baseline mode, pointer-generator mode, and coverage"""
+  """A class to represent a unified model for text summarization."""
 
   def __init__(self, hps, select_model, rewrite_model):
     self._hps = hps
@@ -22,7 +21,6 @@ class SelectorRewriter(object):
     indices = tf.stack((tf.tile(batch_nums, [1, enc_len]), self._rewriter._enc_sent_id_mask), axis=2) # shape (batch_size, enc_len, 2)
     # All pad tokens will get probability of 0.0 since the sentence id is -1 (gather_nd will produce 0.0 for invalid indices)
     selector_probs_projected = tf.gather_nd(self._selector.probs, indices) # shape (batch_size, enc_len)
-
 
     losses = []
     batch_nums_tilek = tf.tile(batch_nums, [1, hps.inconsistent_topk]) # shape (batch_size, k)
@@ -47,11 +45,7 @@ class SelectorRewriter(object):
     hps = self._hps
     # Take gradients of the trainable variables w.r.t. the loss function to minimize
     loss_to_minimize = self._rewriter._total_loss if hps.coverage else self._rewriter._loss
-    if hps.selector_loss_in_end2end:
-      if hps.loss == 'PG' and (hps.regu_ratio_wt > 0.0 or hps.regu_l2_wt > 0.0):
-        loss_to_minimize += (self._selector._total_loss * hps.selector_loss_wt)
-      else:
-        loss_to_minimize += (self._selector._loss * hps.selector_loss_wt)
+    loss_to_minimize += (self._selector._loss * hps.selector_loss_wt)
 
     if hps.inconsistent_loss:
       loss_to_minimize += self._inconsistent_loss
@@ -77,9 +71,6 @@ class SelectorRewriter(object):
     """Add the placeholders, model, global step, train_op and summaries to the graph"""
     tf.logging.info('Building graph...')
     t0 = time.time()
-    if self._hps.selector_loss_in_end2end and self._hps.loss == 'PG':
-      self._selector.running_avg_reward = tf.Variable(0.0, name='running_avg_reward', trainable=False)
-
     self._selector._add_placeholders()
     self._rewriter._add_placeholders()
     with tf.device("/gpu:0"):
@@ -97,16 +88,9 @@ class SelectorRewriter(object):
 
   def run_train_step(self, sess, batch):
     """Runs one training iteration. Returns a dictionary containing train op,
-       summaries, loss, global_step and (optionally) coverage loss."""
+       summaries, loss, global_step and coverage loss."""
     hps = self._hps
     feed_dict = self._selector._make_feed_dict(batch)
-
-    if hps.selector_loss_in_end2end and hps.loss == 'PG':
-      actions_sample = sess.run(self._selector.actions_sample, feed_dict)  # (batch_size, max_art_len)
-      results_sample = self._selector._get_rewards(actions_sample, batch)
-      feed_dict[self._selector.actions_sample] = results_sample['actions']
-      feed_dict[self._selector.rewards] = results_sample['rewards']
-
     feed_dict.update(self._rewriter._make_feed_dict(batch))
 
     to_return = {
@@ -121,33 +105,15 @@ class SelectorRewriter(object):
       to_return['coverage_loss'] = self._rewriter._coverage_loss
     if hps.inconsistent_loss:
       to_return['inconsist_loss'] = self._inconsistent_loss
-    if hps.selector_loss_in_end2end:
-      to_return['selector_loss'] = self._selector._loss
-      if hps.loss == 'PG':
-        if hps.regu_ratio_wt > 0.0:
-          to_return['ratio_loss'] = self._selector._ratio_loss
-          to_return['total_loss'] = self._selector._total_loss
-        to_return['running_avg_reward'] = self._selector.assign_op  # new running avg reward after the asign op
-        results = sess.run(to_return, feed_dict)
-        #results['argmax'] = results_argmax
-        results['sample'] = results_sample
-        return results
-
+      
+    to_return['selector_loss'] = self._selector._loss
     return sess.run(to_return, feed_dict)
 
   def run_eval_step(self, sess, batch):
     """Runs one evaluation iteration. Returns a dictionary containing summaries,
-       loss, global_step and (optionally) coverage loss."""
+       loss, global_step and coverage loss."""
     hps = self._hps
     feed_dict = self._selector._make_feed_dict(batch)
-    if hps.selector_loss_in_end2end and hps.loss == 'PG':
-      (actions_argmax, actions_sample) = sess.run([self._selector.actions_argmax, \
-                                                   self._selector.actions_sample], feed_dict)  # (batch_size, max_art_len)
-      results_argmax = self._selector._get_rewards(actions_argmax, batch)
-      results_sample = self._selector._get_rewards(actions_sample, batch)
-      feed_dict[self._selector.actions_sample] = results_sample['actions']
-      feed_dict[self._selector.rewards] = results_sample['rewards']
-
     feed_dict.update(self._rewriter._make_feed_dict(batch))
 
     to_return = {
@@ -163,17 +129,7 @@ class SelectorRewriter(object):
     if hps.inconsistent_loss:
       to_return['inconsist_loss'] = self._inconsistent_loss
 
-    if hps.selector_loss_in_end2end:
-      to_return['selector_loss'] = self._selector._loss
-      if hps.loss == 'PG':
-        if hps.regu_ratio_wt > 0.0:
-          to_return['ratio_loss'] = self._selector._ratio_loss
-          to_return['selector_total_loss'] = self._selector._total_loss
-        results = sess.run(to_return, feed_dict)
-        results['argmax'] = results_argmax
-        results['sample'] = results_sample
-        return results
-
+    to_return['selector_loss'] = self._selector._loss
     return sess.run(to_return, feed_dict)
 
 

@@ -24,12 +24,11 @@ import tensorflow as tf
 from attention_decoder import attention_decoder_one_step
 from tensorflow.contrib.tensorboard.plugins import projector
 import data
-import pdb
 
 FLAGS = tf.app.flags.FLAGS
 
 class Rewriter(object):
-  """A class to represent a sequence-to-sequence model for text summarization. Supports both baseline mode, pointer-generator mode, and coverage"""
+  """A class to represent a sequence-to-sequence model for text summarization."""
 
   def __init__(self, hps, vocab):
     self._hps = hps
@@ -42,10 +41,7 @@ class Rewriter(object):
       elif hps.eval_method == 'rouge':
         self._graph_mode = hps.decode_method + '_search'
     elif hps.mode == 'evalall':
-      if hps.decode_method == 'loss':
-        self._graph_mode = 'teacher_forcing'
-      else:
-        self._graph_mode = hps.decode_method + '_search'
+      self._graph_mode = hps.decode_method + '_search'
 
   def _add_placeholders(self):
     """Add placeholders to the graph. These are entry points for any input data."""
@@ -55,11 +51,10 @@ class Rewriter(object):
     self._enc_batch = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_batch')
     self._enc_lens = tf.placeholder(tf.int32, [hps.batch_size], name='enc_lens')
     self._enc_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, None], name='enc_padding_mask')
+    self._enc_batch_extend_vocab = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_batch_extend_vocab')
+    self._max_art_oovs = tf.placeholder(tf.int32, [], name='max_art_oovs')
     if hps.model == 'end2end':
       self._enc_sent_id_mask = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_sent_id_mask')
-    if FLAGS.pointer_gen:
-      self._enc_batch_extend_vocab = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_batch_extend_vocab')
-      self._max_art_oovs = tf.placeholder(tf.int32, [], name='max_art_oovs')
 
     # decoder part
     if self._graph_mode in ['teacher_forcing', 'beam_search']:
@@ -85,11 +80,10 @@ class Rewriter(object):
     feed_dict[self._enc_batch] = batch.enc_batch
     feed_dict[self._enc_lens] = batch.enc_lens
     feed_dict[self._enc_padding_mask] = batch.enc_padding_mask
+    feed_dict[self._enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
+    feed_dict[self._max_art_oovs] = batch.max_art_oovs
     if hps.model == 'end2end':
       feed_dict[self._enc_sent_id_mask] = batch.enc_sent_id_mask
-    if FLAGS.pointer_gen:
-      feed_dict[self._enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
-      feed_dict[self._max_art_oovs] = batch.max_art_oovs
     if just_enc == False:
       if self._graph_mode in ['teacher_forcing', 'beam_search']:
         feed_dict[self._dec_batch] = batch.dec_batch
@@ -184,7 +178,6 @@ class Rewriter(object):
                                                 inputs, self._dec_out_state, self._enc_states, \
                                                 self._enc_padding_mask, cell, \
                                                 prev_context=prev_context, \
-                                                pointer_gen=hps.pointer_gen, \
                                                 use_coverage=hps.coverage, \
                                                 prev_coverage=prev_coverage, \
                                                 selector_probs=selector_probs, \
@@ -202,7 +195,6 @@ class Rewriter(object):
       attn_dists_norescale = []
       attn_dists = []
       p_gens = []
-      vocab_scores = []
       log_dists = []
 
       if self._graph_mode == 'greedy_search':
@@ -255,17 +247,13 @@ class Rewriter(object):
           w_t = tf.transpose(w)
           v = tf.get_variable('v', [vsize], dtype=tf.float32, initializer=self.trunc_norm_init)
           vocab_score = (tf.nn.xw_plus_b(decoder_output, w, v)) # apply the linear layer
-          vocab_scores.append(vocab_score) # baseline model (no pointer_gen) need this
           vocab_dist = tf.nn.softmax(vocab_score)
 
         ##############################################################################
         # For pointer-generator model, calc final dist from copy dist and vocab dist #
         ##############################################################################
-        if FLAGS.pointer_gen:
-          final_dist = self._calc_final_dist_one_step(vocab_dist, attn_dist, p_gen)
-          log_dist = tf.log(final_dist)
-        else: # final distribution is just vocabulary distribution
-          log_dist = tf.log(vocab_dist)
+        final_dist = self._calc_final_dist_one_step(vocab_dist, attn_dist, p_gen)
+        log_dist = tf.log(final_dist)
         log_dists.append(log_dist)
 
         if self._graph_mode == 'greedy_search':
@@ -278,7 +266,7 @@ class Rewriter(object):
     if self._graph_mode == 'greedy_search':
       return tf.stack(predict_words, axis=1)  # shape (batch_size, max_dec_steps)
     else:
-      return vocab_scores, log_dists, attn_dists_norescale, attn_dists, p_gens
+      return log_dists, attn_dists_norescale, attn_dists, p_gens
 
 
   def _calc_final_dist_one_step(self, vocab_dist, attn_dist, p_gen):
@@ -375,7 +363,7 @@ class Rewriter(object):
       if self._graph_mode == 'greedy_search':
         self.greedy_search_words = self._add_decoder(dec_inputs=None)
       else:
-        vocab_scores, log_dists, self.attn_dists_norescale, self.attn_dists, self.p_gens = self._add_decoder(dec_inputs)
+        log_dists, self.attn_dists_norescale, self.attn_dists, self.p_gens = self._add_decoder(dec_inputs)
 
       ################################################
       # Calculate the loss for train and eval mode   #
@@ -385,24 +373,18 @@ class Rewriter(object):
           ################################
           # teacher forcing loss         #
           ################################
-          if FLAGS.pointer_gen: 
-            # Calculate the loss per step
-            # This is fiddly; we use tf.gather_nd to pick out the log probs of the gold target words
-            loss_per_step = [] # will be list length max_dec_steps containing shape (batch_size)
-            batch_nums = tf.range(0, limit=hps.batch_size) # shape (batch_size)
-            for dec_step, log_dist in enumerate(log_dists):
-              targets = self._target_batch[:,dec_step] # indices of target words. shape (batch_size)
-              indices = tf.stack((batch_nums, targets), axis=1) # shape (batch_size, 2)
-              losses = tf.gather_nd(-log_dist, indices) # shape (batch_size). loss on this step for each batch
-              loss_per_step.append(losses)
+          # Calculate the loss per step
+          # This is fiddly; we use tf.gather_nd to pick out the log probs of the gold target words
+          loss_per_step = [] # will be list length max_dec_steps containing shape (batch_size)
+          batch_nums = tf.range(0, limit=hps.batch_size) # shape (batch_size)
+          for dec_step, log_dist in enumerate(log_dists):
+            targets = self._target_batch[:,dec_step] # indices of target words. shape (batch_size)
+            indices = tf.stack((batch_nums, targets), axis=1) # shape (batch_size, 2)
+            losses = tf.gather_nd(-log_dist, indices) # shape (batch_size). loss on this step for each batch
+            loss_per_step.append(losses)
 
-            # Apply dec_padding_mask and get loss
-            self._loss = _mask_and_avg(loss_per_step, self._dec_padding_mask)
-          else: # baseline model
-            # this function applies softmax internally
-            self._loss = tf.contrib.seq2seq.sequence_loss(tf.stack(vocab_scores, axis=1), \
-                                                  self._target_batch, self._dec_padding_mask) 
-
+          # Apply dec_padding_mask and get loss
+          self._loss = _mask_and_avg(loss_per_step, self._dec_padding_mask)
           tf.summary.scalar('loss', self._loss)
           self.p_gen_avg = tf.reduce_mean(tf.stack(self.p_gens))
           tf.summary.scalar('p_gen', self.p_gen_avg)
@@ -571,10 +553,9 @@ class Rewriter(object):
       "context_vector": self.context_vector
     }
 
-    if FLAGS.pointer_gen:
-      feed[self._enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
-      feed[self._max_art_oovs] = batch.max_art_oovs
-      to_return['p_gens'] = self.p_gens
+    feed[self._enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
+    feed[self._max_art_oovs] = batch.max_art_oovs
+    to_return['p_gens'] = self.p_gens
 
     if self._hps.coverage:
       feed[self.prev_coverage] = np.stack(prev_coverage, axis=0)
@@ -594,11 +575,8 @@ class Rewriter(object):
     attn_dists = results['attn_dists'][0].tolist()
     new_context = results['context_vector'].tolist()
 
-    if FLAGS.pointer_gen:
-      # Convert a tensor to a list of k arrays
-      p_gens = results['p_gens'][0].tolist()
-    else:
-      p_gens = [None for _ in xrange(beam_size)]
+    # Convert a tensor to a list of k arrays
+    p_gens = results['p_gens'][0].tolist()
 
     # Convert the coverage tensor to a list length k containing the coverage vector for each hypothesis
     if FLAGS.coverage:

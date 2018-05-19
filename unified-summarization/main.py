@@ -55,15 +55,16 @@ tf.app.flags.DEFINE_boolean('single_pass', False, 'For decode mode only. If True
 # Where to save output
 tf.app.flags.DEFINE_integer('max_train_iter', 10000, 'max iterations to train')
 tf.app.flags.DEFINE_integer('save_model_every', 1000, 'save the model every N iterations')
-tf.app.flags.DEFINE_integer('model_max_to_keep', 30, 'save latest N models')
+tf.app.flags.DEFINE_integer('model_max_to_keep', 5, 'save latest N models')
 tf.app.flags.DEFINE_string('log_root', '', 'Root directory for all logging.')
 tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be saved in a directory with this name, under log_root.')
 
-# For eval mode (This mode will do evaluation during training for choosing best model)
+# For eval mode used in rewriter and end2end training 
+# (This mode will do evaluation during training for choosing best model)
 tf.app.flags.DEFINE_string('eval_method', '', 'loss or rouge (loss mode is to get the loss for one batch; rouge mode is to get rouge scores for the whole dataset)')
 tf.app.flags.DEFINE_integer('start_eval_rouge', 30000, 'for rouge mode, start evaluating rouge scores after this iteration')
 
-# For evalall mode or (eval mode and eval_method == 'rouge')
+# For evalall mode or (eval mode with eval_method == 'rouge')
 tf.app.flags.DEFINE_string('decode_method', '', 'greedy/beam')
 tf.app.flags.DEFINE_boolean('load_best_val_model', False, '')
 tf.app.flags.DEFINE_boolean('load_best_test_model', False, '')
@@ -71,12 +72,14 @@ tf.app.flags.DEFINE_string('eval_ckpt_path', '', 'checkpoint path for evalall mo
 tf.app.flags.DEFINE_boolean('save_pkl', False, 'whether to save the results as pickle files')
 tf.app.flags.DEFINE_boolean('save_vis', False, 'whether to save the results for visualization')
 
-# For end2end training, need to load pretrained model
-tf.app.flags.DEFINE_string('pretrained_selector_path', '', 'selector checkpoint path for end2end model')
-tf.app.flags.DEFINE_string('pretrained_rewriter_path', '', 'rewriter checkpoint path for end2end model')
-tf.app.flags.DEFINE_boolean('selector_loss_in_end2end', False, 'whether to minimize selector loss when end2end')
-tf.app.flags.DEFINE_float('selector_loss_wt', 1.0, 'weight of selector loss when end2end')
-tf.app.flags.DEFINE_boolean('inconsistent_loss', False, 'whether to minimize inconsistent loss when end2end')
+# Load pretrained selector or rewriter
+tf.app.flags.DEFINE_string('pretrained_selector_path', '', 'pretrained selector checkpoint path')
+tf.app.flags.DEFINE_string('pretrained_rewriter_path', '', 'pretrained rewriter checkpoint path')
+
+# For end2end training
+#tf.app.flags.DEFINE_boolean('selector_loss_in_end2end', True, 'whether to minimize selector loss when end2end')
+tf.app.flags.DEFINE_float('selector_loss_wt', 5.0, 'weight of selector loss when end2end')
+tf.app.flags.DEFINE_boolean('inconsistent_loss', True, 'whether to minimize inconsistent loss when end2end')
 tf.app.flags.DEFINE_integer('inconsistent_topk', 3, 'choose top K word attention to compute inconsistent loss')
 
 # Hyperparameters for both selector and rewriter
@@ -90,12 +93,6 @@ tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, 
 tf.app.flags.DEFINE_float('max_grad_norm', 2.0, 'for gradient clipping')
 
 # Hyperparameters for selector only
-tf.app.flags.DEFINE_string('loss', 'CE', 'CE/PG (cross entropy/ policy gradient)')
-tf.app.flags.DEFINE_string('reward', 'r', 'r/f (rougeL recall/f-measure score)')
-tf.app.flags.DEFINE_float('regu_ratio', 0.3, 'select ratio used in regularization term of policy gradient')
-tf.app.flags.DEFINE_float('regu_ratio_wt', 1.0, 'wieght of ratio regularization term of policy gradient')
-tf.app.flags.DEFINE_float('regu_l2_wt', 0.0, 'weight of l2 regularization term of policy gradient')
-tf.app.flags.DEFINE_string('rnn_type', 'GRU', 'LSTM/GRU')
 tf.app.flags.DEFINE_integer('hidden_dim_selector', 200, 'dimension of RNN hidden states')
 tf.app.flags.DEFINE_integer('max_art_len', 50, 'max timesteps of sentence-level encoder')
 tf.app.flags.DEFINE_integer('max_sent_len', 50, 'max timesteps of word-level encoder')
@@ -103,10 +100,7 @@ tf.app.flags.DEFINE_string('select_method', 'prob', 'prob/ratio/num')
 tf.app.flags.DEFINE_float('thres', 0.4, 'threshold for selecting sentence')
 tf.app.flags.DEFINE_integer('min_select_sent', 5, 'min sentences need to be selected')
 tf.app.flags.DEFINE_integer('max_select_sent', 20, 'max sentences to be selected')
-tf.app.flags.DEFINE_boolean('eval_gt_rouge', False, 'whether to evaluate ground-truth selected sentences ROUGE scores')
-tf.app.flags.DEFINE_boolean('eval_rouge', False, 'whether to evaluate ROUGE scores')
-tf.app.flags.DEFINE_boolean('save_bin', True, 'whether to save the results as binary files')
-tf.app.flags.DEFINE_boolean('plot', True, 'whether to plot the precision/recall and recall/ratio curves')
+tf.app.flags.DEFINE_boolean('eval_gt_rouge', False, 'whether to evaluate ROUGE scores of ground-truth selected sentences')
 
 # Hyperparameters for rewriter only
 tf.app.flags.DEFINE_integer('hidden_dim_rewriter', 256, 'dimension of RNN hidden states')
@@ -116,7 +110,7 @@ tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.
 tf.app.flags.DEFINE_integer('min_dec_steps', 35, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
 
 # Pointer-generator or baseline model
-tf.app.flags.DEFINE_boolean('pointer_gen', True, 'If True, use pointer-generator model. If False, use baseline model.')
+#tf.app.flags.DEFINE_boolean('pointer_gen', True, 'If True, use pointer-generator model. If False, use baseline model.')
 
 # Coverage hyperparameters
 tf.app.flags.DEFINE_boolean('coverage', False, 'Use coverage mechanism. Note, the experiments reported in the ACL paper train WITHOUT coverage until converged, and then train for a short phase WITH coverage afterwards. i.e. to reproduce the results in the ACL paper, turn this off for most of training then turn on for a short phase at the end.')
@@ -164,7 +158,7 @@ def main(unused_argv):
     raise Exception("The single_pass flag should not be True in train mode")
 
   # Make a namedtuple hps, containing the values of the hyperparameters that the model needs
-  hparam_list = ['model', 'mode', 'eval_method', 'rnn_type', 'selector_loss_in_end2end', 'selector_loss_wt', 'inconsistent_loss', 'inconsistent_topk', 'loss', 'reward', 'regu_ratio', 'regu_ratio_wt', 'regu_l2_wt', 'lr', 'adagrad_init_acc', 'rand_unif_init_mag', 'trunc_norm_init_std', 'max_grad_norm', 'hidden_dim_selector', 'hidden_dim_rewriter','emb_dim', 'batch_size', 'max_art_len', 'max_sent_len', 'max_dec_steps', 'max_enc_steps', 'coverage', 'cov_loss_wt', 'pointer_gen', 'eval_gt_rouge', 'decode_method']
+  hparam_list = ['model', 'mode', 'eval_method', 'selector_loss_wt', 'inconsistent_loss', 'inconsistent_topk', 'lr', 'adagrad_init_acc', 'rand_unif_init_mag', 'trunc_norm_init_std', 'max_grad_norm', 'hidden_dim_selector', 'hidden_dim_rewriter','emb_dim', 'batch_size', 'max_art_len', 'max_sent_len', 'max_dec_steps', 'max_enc_steps', 'coverage', 'cov_loss_wt', 'eval_gt_rouge', 'decode_method']
   hps_dict = {}
   for key,val in FLAGS.__flags.iteritems(): # for each flag
     if key in hparam_list: # if it's in the list
@@ -203,7 +197,8 @@ def main(unused_argv):
         run_rewriter.run_eval_rouge(decoder)
     elif hps.mode == 'evalall':
       decode_model_hps = hps  # This will be the hyperparameters for the decoder model
-      decode_model_hps = hps._replace(max_dec_steps=1) # The model is configured with max_dec_steps=1 because we only ever run one step of the decoder at a time (to do beam search). Note that the batcher is initialized with max_dec_steps equal to e.g. 100 because the batches need to contain the full summaries
+      if FLAGS.decode_method == 'beam':
+        decode_model_hps = hps._replace(max_dec_steps=1) # The model is configured with max_dec_steps=1 because we only ever run one step of the decoder at a time (to do beam search). Note that the batcher is initialized with max_dec_steps equal to e.g. 100 because the batches need to contain the full summaries
       model = Rewriter(decode_model_hps, vocab)
       decoder = BeamSearchDecoder(model, batcher, vocab)
       decoder.evaluate() # decode indefinitely (unless single_pass=True, in which case deocde the dataset exactly once)

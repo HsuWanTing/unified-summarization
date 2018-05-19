@@ -42,7 +42,7 @@ def setup_training(model, batcher):
     params = tf.global_variables()
     if FLAGS.pretrained_selector_path: # cross entropy loss eval best model or train model
       params = tf.global_variables()
-      # do not load global step, adagrad state and running avg reward
+      # do not load global step and adagrad states (since the pretrained model may come from best eval model and the eval model do not have adagrad states)
       selector_vars = [param for param in params if "SentSelector" in param.name and 'Adagrad' not in param.name]
       uninitialized_vars = [param for param in params if param not in selector_vars]
       pretrained_saver = tf.train.Saver(selector_vars)
@@ -58,7 +58,7 @@ def setup_training(model, batcher):
                          local_init_op=local_init_op,
                          summary_op=None,
                          save_summaries_secs=60, # save summaries for tensorboard every 60 secs
-                         save_model_secs=0, # checkpoint every 60 secs
+                         save_model_secs=0, # do not save checkpoint
                          global_step=model.global_step)
   else:
     sv = tf.train.Supervisor(logdir=train_dir,
@@ -66,7 +66,7 @@ def setup_training(model, batcher):
                          saver=saver,
                          summary_op=None,
                          save_summaries_secs=60, # save summaries for tensorboard every 60 secs
-                         save_model_secs=0, # checkpoint every 60 secs
+                         save_model_secs=0, # do not save checkpoint
                          global_step=model.global_step)  
 
   summary_writer = sv.summary_writer
@@ -113,24 +113,9 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer,
 
       train_step = results['global_step'] # we need this to update our running average loss
 
-      if FLAGS.loss == 'PG':
-        if FLAGS.regu_ratio_wt > 0.0:
-          tf.logging.info('ratio loss: %f', results['ratio_loss'])
-          tf.logging.info('total loss: %f', results['total_loss'])
-        write_to_summary(results['sample']['avg_reward'], 'SentSelector/reward', train_step, summary_writer)
-        write_to_summary(results['sample']['avg_ratio'], 'SentSelector/select_ratio/sample', train_step, summary_writer)
-        write_to_summary(results['sample']['avg_gt_recall'], 'SentSelector/gt_recall/sample', train_step, summary_writer)
-        tf.logging.info('Sample, reward: %f, ratio: %f, gt_recall: %f' % (results['sample']['avg_reward'], results['sample']['avg_ratio'], results['sample']['avg_gt_recall']))
-        #write_to_summary(results['argmax']['avg_reward'], 'SentSelector/reward/argmax', train_step, summary_writer)
-        #write_to_summary(results['argmax']['avg_ratio'], 'SentSelector/select_ratio/argmax', train_step, summary_writer)
-        #write_to_summary(results['argmax']['avg_gt_recall'], 'SentSelector/gt_recall/argmax', train_step, summary_writer)
-        #tf.logging.info('Argmax, reward: %f, ratio: %f, gt_recall: %f' % (results['argmax']['avg_reward'], results['argmax']['avg_ratio'], results['argmax']['avg_gt_recall']))
-        write_to_summary(results['running_avg_reward'], 'SentSelector/running_avg_reward/sample/decay=0.990000', train_step, summary_writer)
-        tf.logging.info('running_avg_reward: %f', results['running_avg_reward'])
-
-      recall, ratio, _ = util.get_batch_ratio(batch.original_articles_sents, batch.original_extracts_ids, results['probs'], target_recall=0.9)
-      if recall < 0.89 or recall > 0.91:
-        ratio = 1.0
+      recall, ratio, _ = util.get_batch_ratio(batch.original_articles_sents, \
+                                              batch.original_extracts_ids, \
+                                              results['probs'], target_recall=0.9)
       write_to_summary(ratio, 'SentSelector/select_ratio/recall=0.9', train_step, summary_writer)
       
       # get the summaries and iteration number so we can write summaries to tensorboard
@@ -159,17 +144,9 @@ def run_eval(model, batcher):
   bestmodel_save_path = os.path.join(eval_dir, 'bestmodel') # this is where checkpoints of best models are saved
   summary_writer = tf.summary.FileWriter(eval_dir)
 
-  if FLAGS.loss == 'PG':
-    running_avg_reward_sample = 0 # the eval job keeps a smoother
-    #best_reward_sample = None  # will hold the best loss achieved so far
-    running_avg_reward_argmax = 0 # the eval job keeps a smoother, running average loss to tell it when to implement early stopping
-    best_reward_argmax = None  # will hold the best loss achieved so far
-  else:
-    running_avg_ratio = 0 # the eval job keeps a smoother, running average loss to tell it when to implement early stopping
-    best_ratio = None  # will hold the best loss achieved so far
-  
+  running_avg_ratio = 0 # the eval job keeps a smoother, running average loss to tell it when to implement early stopping
+  best_ratio = None  # will hold the best loss achieved so far
   train_dir = os.path.join(FLAGS.log_root, "train")
-  first_eval_step = True
 
   while True:
     ckpt_state = tf.train.get_checkpoint_state(train_dir)
@@ -189,22 +166,9 @@ def run_eval(model, batcher):
     tf.logging.info('loss: %f', loss)
     train_step = results['global_step']
 
-    if FLAGS.loss == 'PG':
-      if FLAGS.regu_ratio_wt > 0.0:
-        tf.logging.info('ratio loss: %f', results['ratio_loss'])
-        tf.logging.info('total loss: %f', results['total_loss'])
-      write_to_summary(results['sample']['avg_reward'], 'SentSelector/reward', train_step, summary_writer)
-      write_to_summary(results['sample']['avg_ratio'], 'SentSelector/select_ratio/sample', train_step, summary_writer)
-      write_to_summary(results['sample']['avg_gt_recall'], 'SentSelector/gt_recall/sample', train_step, summary_writer)
-      tf.logging.info('Sample, reward: %f, ratio: %f, gt_recall: %f' % (results['sample']['avg_reward'], results['sample']['avg_ratio'], results['sample']['avg_gt_recall']))
-      write_to_summary(results['argmax']['avg_reward'], 'SentSelector/reward/argmax', train_step, summary_writer)
-      write_to_summary(results['argmax']['avg_ratio'], 'SentSelector/select_ratio/argmax', train_step, summary_writer)
-      write_to_summary(results['argmax']['avg_gt_recall'], 'SentSelector/gt_recall/argmax', train_step, summary_writer)
-      tf.logging.info('Argmax, reward: %f, ratio: %f, gt_recall: %f' % (results['argmax']['avg_reward'], results['argmax']['avg_ratio'], results['argmax']['avg_gt_recall']))
-
-    recall, ratio, _ = util.get_batch_ratio(batch.original_articles_sents, batch.original_extracts_ids, results['probs'], target_recall=0.9)
-    if recall < 0.89 or recall > 0.91:
-      ratio = 1.0
+    recall, ratio, _ = util.get_batch_ratio(batch.original_articles_sents, \
+                                            batch.original_extracts_ids, \
+                                            results['probs'], target_recall=0.9)
     write_to_summary(ratio, 'SentSelector/select_ratio/recall=0.9', train_step, summary_writer)
     
     # add summaries
@@ -212,25 +176,14 @@ def run_eval(model, batcher):
     summary_writer.add_summary(summaries, train_step)
 
     # calculate running avg loss
-    if FLAGS.loss == 'PG':
-      running_avg_reward_sample = util.calc_running_avg_loss(results['sample']['avg_reward'], running_avg_reward_sample, summary_writer, train_step, 'SentSelector/running_avg_reward/sample')
-      running_avg_reward_argmax = util.calc_running_avg_loss(results['argmax']['avg_reward'], running_avg_reward_argmax, summary_writer, train_step, 'SentSelector/running_avg_reward/argmax')
-    else:
-      #running_avg_loss = util.calc_running_avg_loss(np.asscalar(loss), running_avg_loss, summary_writer, train_step)
-      running_avg_ratio = util.calc_running_avg_loss(ratio, running_avg_ratio, summary_writer, train_step, 'running_avg_ratio')
+    running_avg_ratio = util.calc_running_avg_loss(ratio, running_avg_ratio, summary_writer, train_step, 'running_avg_ratio')
 
     # If running_avg_loss is best so far, save this checkpoint (early stopping).
     # These checkpoints will appear as bestmodel-<iteration_number> in the eval dir
-    if FLAGS.loss == 'PG':
-      if best_reward_argmax is None or running_avg_reward_argmax > best_reward_argmax:
-        tf.logging.info('Found new best model with %.3f running_avg_reward. Saving to %s', running_avg_reward_argmax, bestmodel_save_path)
-        saver.save(sess, bestmodel_save_path, global_step=train_step, latest_filename='checkpoint_best')
-        best_reward_argmax = running_avg_reward_argmax
-    else:
-      if best_ratio is None or running_avg_ratio < best_ratio:
-        tf.logging.info('Found new best model with %.3f running_avg_ratio. Saving to %s', running_avg_ratio, bestmodel_save_path)
-        saver.save(sess, bestmodel_save_path, global_step=train_step, latest_filename='checkpoint_best')
-        best_ratio = running_avg_ratio
+    if best_ratio is None or running_avg_ratio < best_ratio:
+      tf.logging.info('Found new best model with %.3f running_avg_ratio. Saving to %s', running_avg_ratio, bestmodel_save_path)
+      saver.save(sess, bestmodel_save_path, global_step=train_step, latest_filename='checkpoint_best')
+      best_ratio = running_avg_ratio
 
     # flush the summary writer every so often
     if train_step % 100 == 0:

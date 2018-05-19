@@ -4,13 +4,11 @@ import tensorflow as tf
 from tensorflow.core.example import example_pb2
 import struct
 import data
-import analysis
 import cPickle as pk
 import pyrouge
 import util
 import logging
 import numpy as np
-import pdb
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -25,7 +23,7 @@ class SelectorEvaluator(object):
     """Initialize decoder.
 
     Args:
-      model: a Seq2SeqAttentionModel object.
+      model: a SentSelector object.
       batcher: a Batcher object.
       vocab: Vocabulary object
     """
@@ -40,7 +38,7 @@ class SelectorEvaluator(object):
 
     if FLAGS.eval_gt_rouge: # no need to load model
       # Make a descriptive decode directory name
-      self._decode_dir = os.path.join(FLAGS.log_root, 'gt_select_method3_' + self._dataset)
+      self._decode_dir = os.path.join(FLAGS.log_root, 'select_gt' + self._dataset)
       tf.logging.info('Save evaluation results to '+ self._decode_dir)
       if os.path.exists(self._decode_dir):
         raise Exception("single_pass decode directory %s should not already exist" % self._decode_dir)
@@ -90,17 +88,13 @@ class SelectorEvaluator(object):
 
       if FLAGS.single_pass:
         # Make the dirs to contain output written in the correct format for pyrouge
-        if FLAGS.eval_rouge:
-          self._rouge_ref_dir = os.path.join(self._decode_dir, "reference")
-          if not os.path.exists(self._rouge_ref_dir): os.mkdir(self._rouge_ref_dir)
-          self._rouge_dec_dir = os.path.join(self._decode_dir, "selected")
-          if not os.path.exists(self._rouge_dec_dir): os.mkdir(self._rouge_dec_dir)
+        self._rouge_ref_dir = os.path.join(self._decode_dir, "reference")
+        if not os.path.exists(self._rouge_ref_dir): os.mkdir(self._rouge_ref_dir)
+        self._rouge_dec_dir = os.path.join(self._decode_dir, "selected")
+        if not os.path.exists(self._rouge_dec_dir): os.mkdir(self._rouge_dec_dir)
         if FLAGS.save_pkl:
           self._result_dir = os.path.join(self._decode_dir, "select_result")
           if not os.path.exists(self._result_dir): os.mkdir(self._result_dir)
-        if FLAGS.save_bin:
-          self._chunks_dir = os.path.join(self._decode_dir, "chunked")
-          if not os.path.exists(self._chunks_dir): os.mkdir(self._chunks_dir)
 
         self._probs_pkl_path = os.path.join(self._decode_root_dir, "probs.pkl")
         if not os.path.exists(self._probs_pkl_path): 
@@ -142,16 +136,9 @@ class SelectorEvaluator(object):
             with open(self._probs_pkl_path, 'wb') as output_file:
               pk.dump(probs_all, output_file)
 
-          if FLAGS.save_bin:
-            chunk_file(self._decode_dir, self._chunks_dir, self._dataset)
-
-          if FLAGS.plot:
-            analysis.plot_all(self._decode_root_dir)
-
-          if FLAGS.eval_rouge:
-            tf.logging.info("Output has been saved in %s and %s. Starting ROUGE eval...", self._rouge_ref_dir, self._rouge_dec_dir)
-            rouge_results_dict = rouge_eval(self._rouge_ref_dir, self._rouge_dec_dir)
-            rouge_log(rouge_results_dict, self._decode_dir, 'ROUGE_results.txt')
+          tf.logging.info("Output has been saved in %s and %s. Starting ROUGE eval...", self._rouge_ref_dir, self._rouge_dec_dir)
+          rouge_results_dict = rouge_eval(self._rouge_ref_dir, self._rouge_dec_dir)
+          rouge_log(rouge_results_dict, self._decode_dir, 'ROUGE_results.txt')
 
         t1 = time.time()
         tf.logging.info("evaluation time: %.3f min", (t1-t0)/60.0)
@@ -161,7 +148,6 @@ class SelectorEvaluator(object):
       original_abstract_sents = batch.original_abstracts_sents[0]  # list of strings
       original_select_ids = batch.original_extracts_ids[0]
       original_select_sents = [original_article_sents[idx] for idx in original_select_ids]
-      #pdb.set_trace()
 
       if FLAGS.eval_gt_rouge:
         self.write_for_rouge(original_abstract_sents, original_select_sents, counter) # write ref summary and decoded summary to file, to eval with pyrouge later
@@ -199,14 +185,10 @@ class SelectorEvaluator(object):
       self._ratio.append(ratio)
       
       if FLAGS.single_pass:
-        if FLAGS.eval_rouge:
-          self.write_for_rouge(original_abstract_sents, select_sents, counter) # write ref summary and decoded summary to file, to eval with pyrouge later
+        self.write_for_rouge(original_abstract_sents, select_sents, counter) # write ref summary and decoded summary to file, to eval with pyrouge later
         if FLAGS.save_pkl:
           self.save_result(original_article_sents, original_abstract_sents, select_sents, \
                            select_ids, original_select_ids, p, r, acc, counter)
-        if FLAGS.save_bin:
-          self.write_to_bin(original_article_sents, original_abstract_sents, select_sents, \
-                          select_ids, original_select_ids, counter)
         counter += 1 # this is how many examples we've decoded
  
 
@@ -254,39 +236,6 @@ class SelectorEvaluator(object):
 
     tf.logging.info("Wrote example %i to file" % ex_index)
 
-
-  def write_to_bin(self, article_sents, abstract_sents, select_sents, select_ids, gt_ids, ex_index):
-    SENTENCE_START = '<s>'
-    SENTENCE_END = '</s>'
-    article = ' '.join(["%s %s %s" % (SENTENCE_START, sent, SENTENCE_END) for sent in article_sents])
-    abstract = ' '.join(["%s %s %s" % (SENTENCE_START, sent, SENTENCE_END) for sent in abstract_sents])
-    #extract = ' '.join(["%s %s %s" % (SENTENCE_START, sent, SENTENCE_END) for sent in select_sents])
-    extract_ids = ','.join([str(i) for i in select_ids])
-    gt_ids = ','.join([str(i) for i in gt_ids])
-
-    bin_file = os.path.join(self._decode_dir, self._dataset + ".bin")
-    with open(bin_file, 'ab+') as writer:
-      # Write to tf.Example
-      tf_example = example_pb2.Example()
-      tf_example.features.feature['article'].bytes_list.value.extend([article])
-      tf_example.features.feature['abstract'].bytes_list.value.extend([abstract])
-      #tf_example.features.feature['extract'].bytes_list.value.extend([extract])
-      tf_example.features.feature['extract_ids'].bytes_list.value.extend([extract_ids])
-      tf_example.features.feature['extract_gt_ids'].bytes_list.value.extend([gt_ids])
-      tf_example_str = tf_example.SerializeToString()
-      str_len = len(tf_example_str)
-      writer.write(struct.pack('q', str_len))
-      writer.write(struct.pack('%ds' % str_len, tf_example_str))
-    tf.logging.info("Wrote example %i to binary file" % ex_index)
-
-
-def print_results(article, abstract, decoded_output):
-  """Prints the article, the reference summmary and the decoded summary to screen"""
-  print ""
-  tf.logging.info('ARTICLE:  %s', article)
-  tf.logging.info('REFERENCE SUMMARY: %s', abstract)
-  tf.logging.info('GENERATED SUMMARY: %s', decoded_output)
-  print ""
 
 def make_html_safe(s):
   """Replace any angled brackets in string s to avoid interfering with HTML attention visualizer."""
@@ -361,22 +310,3 @@ def get_decode_dir_name(ckpt_name, dataset):
     dirname = "%s_%.2fthres_%iminselect_%imaxselect" % (FLAGS.select_method, FLAGS.thres, FLAGS.min_select_sent, FLAGS.max_select_sent)
   return root_name, dirname
 
-
-def chunk_file(input_dir, chunks_dir, set_name):
-  in_file = input_dir + '/%s.bin' % set_name
-  reader = open(in_file, "rb")
-  chunk = 0
-  finished = False
-  while not finished:
-    chunk_fname = os.path.join(chunks_dir, '%s_%03d.bin' % (set_name, chunk)) # new chunk
-    with open(chunk_fname, 'wb') as writer:
-      for _ in range(CHUNK_SIZE):
-        len_bytes = reader.read(8)
-        if not len_bytes:
-          finished = True
-          break
-        str_len = struct.unpack('q', len_bytes)[0]
-        example_str = struct.unpack('%ds' % str_len, reader.read(str_len))[0]
-        writer.write(struct.pack('q', str_len))
-        writer.write(struct.pack('%ds' % str_len, example_str))
-      chunk += 1

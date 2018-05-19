@@ -33,24 +33,20 @@ class SentenceSelector(object):
   def __init__(self, hps, vocab):
     self._hps = hps
     self._vocab = vocab
+
+    # There are 2 graph mode: ['comput_loss', 'not_compute_loss']
     if hps.mode == 'train':
-      if hps.model == 'end2end' and hps.selector_loss_in_end2end == False:
-        self._graph_mode = 'not_compute_loss'
-      else:
-        self._graph_mode = 'compute_loss'
+      self._graph_mode = 'compute_loss'
     elif hps.mode == 'eval':
       if hps.model == 'end2end':
-        if hps.selector_loss_in_end2end == False or hps.eval_method == 'rouge':
+        if hps.eval_method == 'rouge':
           self._graph_mode = 'not_compute_loss'
         else:
           self._graph_mode = 'compute_loss'
       elif hps.model == 'selector':
         self._graph_mode = 'compute_loss'
     elif hps.mode == 'evalall':
-      if hps.decode_method == 'loss':
-        self._graph_mode = 'compute_loss'
-      else:
-        self._graph_mode = 'not_compute_loss'
+      self._graph_mode = 'not_compute_loss'
 
   def _add_placeholders(self):
     """Add placeholders to the graph. These are entry points for any input data."""
@@ -61,10 +57,7 @@ class SentenceSelector(object):
     self._art_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len], name='art_padding_mask')
     self._sent_padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len, hps.max_sent_len], name='sent_padding_mask')
     if self._graph_mode == 'compute_loss':
-      if hps.loss != 'PG':
-        self._target_batch = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len], name='target_batch')
-      else:
-        self.rewards = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len], name='rewards')
+      self._target_batch = tf.placeholder(tf.float32, [hps.batch_size, hps.max_art_len], name='target_batch')
 
 
   def _make_feed_dict(self, batch, just_enc=False):
@@ -83,13 +76,12 @@ class SentenceSelector(object):
     feed_dict[self._art_padding_mask] = batch.art_padding_mask # (batch_size, max_art_len)
     feed_dict[self._sent_padding_mask] = batch.sent_padding_mask # (batch_size, max_art_lens, max_sent_len)
     if self._graph_mode == 'compute_loss':
-      if hps.loss != 'PG':
-        feed_dict[self._target_batch] = batch.target_batch_selector # (batch_size, max_art_len)
+      feed_dict[self._target_batch] = batch.target_batch_selector # (batch_size, max_art_len)
     return feed_dict
 
 
   def _add_encoder(self, encoder_inputs, seq_len, name):
-    """Add a single-layer bidirectional LSTM encoder to the graph.
+    """Add a single-layer bidirectional GRU encoder to the graph.
 
     Args:
       encoder_inputs: A tensor of shape [batch_size, <=max_enc_steps, emb_size].
@@ -100,12 +92,8 @@ class SentenceSelector(object):
         A tensor of shape [batch_size, <=max_enc_steps, 2*hidden_dim]. It's 2*hidden_dim because it's the concatenation of the forwards and backwards states.
     """
     with tf.variable_scope(name):
-      if self._hps.rnn_type == 'LSTM':
-        cell_fw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim_selector, initializer=self.rand_unif_init, state_is_tuple=True)
-        cell_bw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim_selector, initializer=self.rand_unif_init, state_is_tuple=True)
-      elif self._hps.rnn_type == 'GRU':
-        cell_fw = tf.contrib.rnn.GRUCell(self._hps.hidden_dim_selector)
-        cell_bw = tf.contrib.rnn.GRUCell(self._hps.hidden_dim_selector)
+      cell_fw = tf.contrib.rnn.GRUCell(self._hps.hidden_dim_selector)
+      cell_bw = tf.contrib.rnn.GRUCell(self._hps.hidden_dim_selector)
       (encoder_outputs, (_, _)) = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
       encoder_outputs = tf.concat(axis=2, values=encoder_outputs) # concatenate the forwards and backwards states
     return encoder_outputs
@@ -176,7 +164,7 @@ class SentenceSelector(object):
         self.embedding = tf.get_variable('embedding', [vsize, hps.emb_dim], dtype=tf.float32, \
                                           initializer=self.trunc_norm_init)
         if hps.mode=="train": self._add_emb_vis(self.embedding) # add to tensorboard
-        emb_batch = tf.nn.embedding_lookup(self.embedding, self._art_batch) # tensor with shape (batch_size, max_art_len, max_sent_len, emb_size), article1_sents + article2_sents + ...
+        emb_batch = tf.nn.embedding_lookup(self.embedding, self._art_batch) # tensor with shape (batch_size, max_art_len, max_sent_len, emb_size)
 
       ########################################
       # Add the two encoders.                #
@@ -214,47 +202,10 @@ class SentenceSelector(object):
       ################################################
       if self._graph_mode == 'compute_loss':
         with tf.variable_scope('loss'):
-          if hps.loss == 'CE':
-            losses = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=self._target_batch) # (batch_size, max_art_len)
-          elif hps.loss == 'PG':
-            losses = self._surrogate_loss(self.probs)
+          losses = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=self._target_batch) # (batch_size, max_art_len)
           loss = tf.reduce_sum(losses * self._art_padding_mask, 1) / tf.reduce_sum(self._art_padding_mask, 1) # (batch_size,)
           self._loss = tf.reduce_mean(loss)
           tf.summary.scalar('loss', self._loss)
-
-          if hps.loss == 'PG' and hps.regu_ratio_wt > 0.0:
-            self._ratio_loss = tf.square(self.avg_prob - hps.regu_ratio)
-            tf.summary.scalar('ratio_loss', self._ratio_loss)
-            self._total_loss = self._loss + hps.regu_ratio_wt * self._ratio_loss
-            tf.summary.scalar('total_loss', self._total_loss)
-
-
-  def _surrogate_loss(self, probs):
-    hps = self._hps
-    # produce not select probs and select probs
-    dists = tf.stack([1.0 - probs, probs], 2)  # (batch_size, max_art_len, 2)
-    log_dists = tf.log(dists + sys.float_info.epsilon)  # to avoid NaN after log, shape (batch_size, max_art_len, 2)
-    log_dists_flatten = tf.reshape(log_dists, [-1, 2])  # (batch_size*max_art_len, 2)
-
-    # Get argmax actions
-    self.actions_argmax = tf.argmax(log_dists, 2)  # (batch_size*max_art_len,)
-
-    # Get sampled actions
-    actions_sample = tf.squeeze(tf.multinomial(log_dists_flatten, num_samples=1))  # (batch_size*max_art_len,)
-    self.actions_sample = tf.reshape(actions_sample, [hps.batch_size, -1]) # (batch_size, max_art_len), 0 is not selected; 1 is selected
-    action_log_probs_sample = tf.where(tf.equal(self.actions_sample, 1), \
-                                log_dists[:, :, 1], log_dists[:, :, 0])  # (batch_size, max_art_len)
-
-    # Calculate advantage and surrogate loss
-    batch_avg_reward = tf.reduce_mean(self.rewards)
-    if hps.mode == 'train':
-      running_avg_reward = self.running_avg_reward * 0.99 + batch_avg_reward * 0.01
-      self.assign_op = tf.assign(self.running_avg_reward, running_avg_reward)
-    else:
-      running_avg_reward = self.running_avg_reward
-    self.advantages = self.rewards - running_avg_reward # (batch_size, max_art_len)
-    losses = -self.advantages * action_log_probs_sample  # (batch_size, max_art_len)
-    return losses
 
 
   def _add_train_op(self):
@@ -262,10 +213,7 @@ class SentenceSelector(object):
     # Take gradients of the trainable variables w.r.t. the loss function to minimize
     hps = self._hps
     tvars = tf.trainable_variables()
-    if hps.loss == 'PG' and (hps.regu_ratio_wt > 0.0 or hps.regu_l2_wt > 0.0):
-      loss_to_minimize = self._total_loss
-    else:
-      loss_to_minimize = self._loss
+    loss_to_minimize = self._loss
     gradients = tf.gradients(loss_to_minimize, tvars, aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
 
     # Clip the gradients
@@ -285,9 +233,6 @@ class SentenceSelector(object):
     """Add the placeholders, model, global step, train_op and summaries to the graph"""
     tf.logging.info('Building graph...')
     t0 = time.time()
-    if self._hps.loss == 'PG':
-      self.running_avg_reward = tf.Variable(0.0, name='running_avg_reward', trainable=False)
-
     self._add_placeholders()
     with tf.device("/gpu:0"):
       self._add_sent_selector()
@@ -298,55 +243,13 @@ class SentenceSelector(object):
     t1 = time.time()
     tf.logging.info('Time to build graph: %i seconds', t1 - t0)
 
-  def _get_rewards(self, actions, batch):
-    '''Get sampled actions and calculate reward for policy gradient training.'''
-    hps = self._hps
-    rewards = []
-    ratios = []
-    gt_recalls = []
-    for i in range(hps.batch_size):
-      art_sents = batch.original_articles_sents[i]
-      abs_sents = batch.original_abstracts_sents[i]
-      max_art_len = min(hps.max_art_len, len(art_sents))
-      select_sents = [art_sents[idx] for idx in range(max_art_len) if actions[i, idx] == 1.0]
-      rougeL_f, _, rougeL_r = my_rouge.rouge_l_summary_level(select_sents, abs_sents)
-      if hps.reward == 'r':
-        rewards.append(rougeL_r)
-      elif hps.reward == 'f':
-        rewards.append(rougeL_f)
-      ratios.append(len(select_sents) / float(len(art_sents)))
-
-      # recall with ground truth seleted sentences
-      gt_hit = [idx for idx in range(max_art_len) if idx in batch.original_extracts_ids[i] and actions[i, idx] == 1.0]
-      gt_recalls.append(len(gt_hit) / float(len(batch.original_extracts_ids[i])))
-
-    # Calculate average reward and average ratio for this batch
-    batch_avg_reward = sum(rewards) / float(len(rewards))
-    batch_avg_ratio = sum(ratios) / float(len(ratios))
-    batch_avg_gt_recall = sum(gt_recalls) / float(len(gt_recalls))
-    rewards = np.tile(np.array(rewards).reshape(-1, 1), (1, hps.max_art_len))  # (batch_size, max_art_len)
-    results = {'actions': actions,
-               'rewards': rewards,
-               'avg_reward': batch_avg_reward,
-               'avg_ratio': batch_avg_ratio,
-               'avg_gt_recall': batch_avg_gt_recall}
-    return results
 
   def run_train_step(self, sess, batch):
     """This function will only be called when hps.model == selector
        Runs one training iteration. Returns a dictionary containing train op, 
-       summaries, loss, global_step and (optionally) coverage loss."""
+       summaries, loss, probs and global_step."""
     hps = self._hps
     feed_dict = self._make_feed_dict(batch)
-
-    if hps.loss == 'PG':
-      #(actions_argmax, actions_sample) = sess.run([self.actions_argmax, \
-      #                                             self.actions_sample], feed_dict)  # (batch_size, max_art_len)
-      #results_argmax = self._get_rewards(actions_argmax, batch)
-      actions_sample = sess.run(self.actions_sample, feed_dict)  # (batch_size, max_art_len)
-      results_sample = self._get_rewards(actions_sample, batch)
-      feed_dict[self.actions_sample] = results_sample['actions']
-      feed_dict[self.rewards] = results_sample['rewards']
 
     to_return = {
         'train_op': self._train_op,
@@ -355,34 +258,17 @@ class SentenceSelector(object):
         'probs': self.probs,
         'global_step': self.global_step,
     }
-
-    if hps.loss == 'PG':
-      if hps.regu_ratio_wt > 0.0:
-        to_return['ratio_loss'] = self._ratio_loss
-        to_return['total_loss'] = self._total_loss
-      to_return['running_avg_reward'] = self.assign_op  # new running avg reward after the asign op
-      results = sess.run(to_return, feed_dict)
-      #results['argmax'] = results_argmax
-      results['sample'] = results_sample
-      return results
-    else:
-      return sess.run(to_return, feed_dict)
+    return sess.run(to_return, feed_dict)
 
   def run_eval_step(self, sess, batch, probs_only=False):
     """This function will be called when hps.model == selector or end2end
        Runs one evaluation iteration. Returns a dictionary containing summaries, 
-       loss, global_step and (optionally) coverage loss."""
+       loss, global_step and (optionally) probs.
+       
+       probs_only: when evaluating the selector, only output the sent probs
+    """
     hps = self._hps
     feed_dict = self._make_feed_dict(batch)
-
-    if self._graph_mode == 'compute_loss' and hps.loss == 'PG':
-      (actions_argmax, actions_sample) = sess.run([self.actions_argmax, \
-                                                   self.actions_sample], feed_dict)  # (batch_size, max_art_len)
-      results_argmax = self._get_rewards(actions_argmax, batch)
-      results_sample = self._get_rewards(actions_sample, batch)
-      feed_dict[self.actions_sample] = results_sample['actions']
-      feed_dict[self.rewards] = results_sample['rewards']
-
     to_return = {'probs': self.probs}
 
     if not probs_only:
@@ -390,16 +276,5 @@ class SentenceSelector(object):
       to_return['loss'] = self._loss
       to_return['global_step'] = self.global_step
 
-      if hps.loss == 'PG':
-        if hps.regu_ratio_wt > 0.0:
-          to_return['ratio_loss'] = self._ratio_loss
-          to_return['total_loss'] = self._total_loss
-        results = sess.run(to_return, feed_dict)
-        results['argmax'] = results_argmax
-        results['sample'] = results_sample
-        #results['batch_avg_reward'] = batch_avg_reward
-        #results['batch_avg_ratio'] = batch_avg_ratio
-        #results['batch_avg_gt_recall'] = batch_avg_gt_recall
-        return results
     return sess.run(to_return, feed_dict)
 

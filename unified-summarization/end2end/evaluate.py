@@ -31,7 +31,7 @@ class End2EndEvaluator(object):
     self._model.build_graph()
     self._batcher = batcher
     self._vocab = vocab
-    self._saver = tf.train.Saver(max_to_keep=3) # we use this to load checkpoints for decoding
+    self._saver = tf.train.Saver() # we use this to load checkpoints for decoding
     self._sess = tf.Session(config=util.get_config())
     if FLAGS.mode == 'evalall':
       self.prepare_evaluate()
@@ -69,7 +69,7 @@ class End2EndEvaluator(object):
     # Make the decode dir if necessary
     if not os.path.exists(self._decode_dir): os.mkdir(self._decode_dir)
 
-    if FLAGS.single_pass and FLAGS.decode_method != 'loss':
+    if FLAGS.single_pass:
       # Make the dirs to contain output written in the correct format for pyrouge
       self._rouge_ref_dir = os.path.join(self._decode_dir, "reference")
       if not os.path.exists(self._rouge_ref_dir): os.mkdir(self._rouge_ref_dir)
@@ -85,45 +85,27 @@ class End2EndEvaluator(object):
 
   def evaluate(self):
     """Decode examples until data is exhausted (if FLAGS.single_pass) and return, or decode indefinitely, loading latest checkpoint at regular intervals"""
-
     t0 = time.time()
     counter = 0
-
-    if FLAGS.decode_method == 'loss':
-      losses = {'rewriter_celoss': [], 'rewriter_covloss': [], 'selector_loss': [], 'incon_loss': []}
 
     while True:
       batch = self._batcher.next_batch()  # 1 example repeated across batch
       if batch is None: # finished decoding dataset in single_pass mode
         assert FLAGS.single_pass, "Dataset exhausted, but we are not in single_pass mode"
         tf.logging.info("Decoder has finished reading dataset for single_pass.")
-        if FLAGS.decode_method == 'loss':
-          tf.logging.info("rewriter_celoss: %f", sum(losses['rewriter_celoss'])/float(len(losses['rewriter_celoss'])))
-          tf.logging.info("rewriter_covloss: %f", sum(losses['rewriter_covloss'])/float(len(losses['rewriter_covloss'])))
-          tf.logging.info("selector_loss: %f", sum(losses['selector_loss'])/float(len(losses['selector_loss'])))
-          tf.logging.info("incon_loss: %f", sum(losses['incon_loss'])/float(len(losses['incon_loss'])))
-        else:
-          tf.logging.info("Output has been saved in %s and %s. Starting ROUGE eval...", self._rouge_ref_dir, self._rouge_dec_dir)
-          rouge_results_dict = rouge_eval(self._rouge_ref_dir, self._rouge_dec_dir)
-          rouge_results, rouge_results_str = rouge_log(rouge_results_dict, self._decode_dir)
-
+        tf.logging.info("Output has been saved in %s and %s. Starting ROUGE eval...", self._rouge_ref_dir, self._rouge_dec_dir)
+        rouge_results_dict = rouge_eval(self._rouge_ref_dir, self._rouge_dec_dir)
+        rouge_results, rouge_results_str = rouge_log(rouge_results_dict, self._decode_dir)
         t1 = time.time()
         tf.logging.info("evaluation time: %.3f min", (t1-t0)/60.0)
         return rouge_results, rouge_results_str
 
-      if FLAGS.decode_method == 'loss':
-        results = self._model.run_eval_step(self._sess, batch)
-        losses['rewriter_celoss'].append(results['loss'])
-        losses['rewriter_covloss'].append(results['coverage_loss'])
-        losses['selector_loss'].append(results['selector_loss'])
-        losses['incon_loss'].append(results['inconsist_loss'])
-      elif FLAGS.decode_method == 'greedy':
+      if FLAGS.decode_method == 'greedy':
         output_ids = self._model.run_greedy_search(self._sess, batch)
         for i in range(FLAGS.batch_size):
           self.process_one_article(batch.original_articles_sents[i], batch.original_abstracts_sents[i], \
                                    batch.original_extracts_ids[i], output_ids[i], \
-                                   (batch.art_oovs[i] if FLAGS.pointer_gen else None), \
-                                   None, None, None, None, None, counter)
+                                   batch.art_oovs[i], None, None, None, None, None, counter)
           counter += 1
       elif FLAGS.decode_method == 'beam':
         # Get sentence probabilities from selector
@@ -136,9 +118,9 @@ class End2EndEvaluator(object):
         output_ids = [int(t) for t in best_hyp.tokens[1:]]    # remove start token
         best_hyp.log_probs = best_hyp.log_probs[1:]   # remove start token probability
         self.process_one_article(batch.original_articles_sents[0], batch.original_abstracts_sents[0], \
-                                 batch.original_extracts_ids[0], output_ids, \
-                                 (batch.art_oovs[0] if FLAGS.pointer_gen else None), best_hyp.attn_dists_norescale,\
-                                 best_hyp.attn_dists, best_hyp.p_gens, best_hyp.log_probs, sent_probs, counter)
+                                 batch.original_extracts_ids[0], output_ids, batch.art_oovs[0], \
+                                 best_hyp.attn_dists_norescale, best_hyp.attn_dists, \
+                                 best_hyp.p_gens, best_hyp.log_probs, sent_probs, counter)
         counter += 1
 
  
@@ -240,8 +222,7 @@ class End2EndEvaluator(object):
         'probs': np.exp(log_probs).tolist(),
         'sent_probs': sent_probs
     }
-    if FLAGS.pointer_gen:
-      to_write['p_gens'] = p_gens
+    to_write['p_gens'] = p_gens
     if count != None:
       output_fname = os.path.join(self._rouge_vis_dir, 'attn_vis_data_%06d.json' % count)
     else:
@@ -253,14 +234,6 @@ class End2EndEvaluator(object):
 
   def init_batcher(self):
     self._batcher = Batcher(FLAGS.data_path, self._vocab, self._model._hps, single_pass=FLAGS.single_pass)
-
-def print_results(article, abstract, decoded_output):
-  """Prints the article, the reference summmary and the decoded summary to screen"""
-  print ""
-  tf.logging.info('ARTICLE:  %s', article)
-  tf.logging.info('REFERENCE SUMMARY: %s', abstract)
-  tf.logging.info('GENERATED SUMMARY: %s', decoded_output)
-  print ""
 
 
 def make_html_safe(s):

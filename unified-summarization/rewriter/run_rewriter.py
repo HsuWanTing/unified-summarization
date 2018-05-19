@@ -116,8 +116,7 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer):
       if not np.isfinite(loss):
         raise Exception("Loss is not finite. Stopping.")
 
-      if FLAGS.pointer_gen:
-        tf.logging.info("pgen_avg: %f", results['p_gen_avg'])
+      tf.logging.info("pgen_avg: %f", results['p_gen_avg'])
 
       if FLAGS.coverage:
         tf.logging.info("coverage_loss: %f", results['coverage_loss']) # print the coverage loss to screen
@@ -125,7 +124,6 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer):
       # get the summaries and iteration number so we can write summaries to tensorboard
       summaries = results['summaries'] # we will write these summaries to tensorboard using summary_writer
       train_step = results['global_step'] # we need this to update our running average loss
-
       summary_writer.add_summary(summaries, train_step) # write the summaries
       if train_step % 100 == 0: # flush the summary writer every so often
         summary_writer.flush()
@@ -149,20 +147,9 @@ def run_eval(model, batcher):
   running_avg_loss = 0 # the eval job keeps a smoother, running average loss to tell it when to implement early stopping
   best_loss = None  # will hold the best loss achieved so far
   train_dir = os.path.join(FLAGS.log_root, "train")
-  first_eval_step = True
 
   while True:
     ckpt_state = tf.train.get_checkpoint_state(train_dir)
-    '''
-    if ckpt_state:
-      step = int(os.path.basename(ckpt_state.model_checkpoint_path).split('-')[1])
-
-      if first_eval_step:
-        final_step = (int(step/FLAGS.max_train_iter) + 1) * FLAGS.max_train_iter
-        first_eval_step = False
-      if step == final_step:
-        break
-    '''
     tf.logging.info('max_enc_steps: %d, max_dec_steps: %d', FLAGS.max_enc_steps, FLAGS.max_dec_steps)
     _ = util.load_ckpt(saver, sess) # load a new checkpoint
     batch = batcher.next_batch() # get the next batch
@@ -176,16 +163,15 @@ def run_eval(model, batcher):
     # print the loss and coverage loss to screen
     loss = results['loss']
     tf.logging.info('loss: %f', loss)
+    train_step = results['global_step']
 
-    if FLAGS.pointer_gen:
-      tf.logging.info("pgen_avg: %f", results['p_gen_avg'])
+    tf.logging.info("pgen_avg: %f", results['p_gen_avg'])
 
     if FLAGS.coverage:
       tf.logging.info("coverage_loss: %f", results['coverage_loss'])
 
     # add summaries
     summaries = results['summaries']
-    train_step = results['global_step']
     summary_writer.add_summary(summaries, train_step)
 
     # calculate running avg loss

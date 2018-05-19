@@ -233,6 +233,13 @@ def get_batch_ratio(batch_article_sents, batch_gt_ids, batch_probs, target_recal
     count += 1
     #print count
 
+  if recall < min_recall or recall > max_recall:
+    if tf_print:
+      tf.logging.warning('fail to reach target recall')      
+    recall = 0.0
+    thres = 0.0
+    ratio = 1.0
+
   if tf_print:
     tf.logging.info('recall: %f, ratio: %f, thres: %f', recall, ratio, thres)
   return recall, ratio, thres

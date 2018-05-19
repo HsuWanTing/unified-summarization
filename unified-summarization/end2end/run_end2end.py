@@ -32,31 +32,6 @@ def write_to_summary(value, tag_name, step, summary_writer):
   summary.value.add(tag=tag_name, simple_value=value)
   summary_writer.add_summary(summary, step)
 
-def convert_to_coverage_model():
-  """Load non-coverage checkpoint, add initialized extra variables for coverage, and save as new checkpoint"""
-  tf.logging.info("converting non-coverage model to coverage model..")
-
-  # initialize an entire coverage model from scratch
-  sess = tf.Session(config=util.get_config())
-  print "initializing everything..."
-  sess.run(tf.global_variables_initializer())
-
-  # load all non-coverage weights from checkpoint
-  saver = tf.train.Saver([v for v in tf.global_variables() if "coverage" not in v.name and "Adagrad" not in v.name])
-  print "restoring non-coverage variables..."
-  curr_ckpt = util.load_ckpt(saver, sess)
-  print "restored."
-
-  # save this model and quit
-  ckpt_path = os.path.join(FLAGS.log_root, "train", "model.ckpt_cov")
-  step = curr_ckpt.split('-')[1]
-  new_fname = ckpt_path + '-' + step + '-init'
-  print "saving model to %s..." % (new_fname)
-  new_saver = tf.train.Saver() # this one will save all variables that now exist
-  new_saver.save(sess, new_fname)
-  print "saved."
-  exit()
-
 def setup_training(model, batcher):
   """Does setup before starting training (run_training)"""
   train_dir = os.path.join(FLAGS.log_root, "train")
@@ -64,17 +39,13 @@ def setup_training(model, batcher):
 
   default_device = tf.device('/gpu:0')
   with default_device:
+    assert FLAGS.coverage, "Please run the end2end model with coverage mechanism."
     model.build_graph() # build the graph
-    if FLAGS.convert_to_coverage_model:
-      assert FLAGS.coverage, "To convert your non-coverage model to a coverage model, run with convert_to_coverage_model=True and coverage=True"
-      convert_to_coverage_model()
 
     if FLAGS.pretrained_selector_path and FLAGS.pretrained_rewriter_path:
       params = tf.global_variables()
-      selector_vars = [param for param in params if "SentSelector" in param.name and 'Adagrad' not in param.name and 'Adam' not in param.name]
-      if FLAGS.selector_loss_in_end2end and FLAGS.loss == 'PG':
-        selector_vars += [param for param in params if 'running_avg_reward' in param.name]
-      rewriter_vars = [param for param in params if "seq2seq" in param.name and 'Adagrad' not in param.name and 'Adam' not in param.name]
+      selector_vars = [param for param in params if "SentSelector" in param.name and 'Adagrad' not in param.name]
+      rewriter_vars = [param for param in params if "seq2seq" in param.name and 'Adagrad' not in param.name]
       uninitialized_vars = [param for param in params if param not in selector_vars and param not in rewriter_vars]
       selector_saver = tf.train.Saver(selector_vars)
       rewriter_saver = tf.train.Saver(rewriter_vars)
@@ -121,10 +92,7 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer, \
                  selector_saver=None, rewriter_saver=None, all_saver=None):
   """Repeatedly runs training iterations, logging loss to screen and writing summaries"""
   tf.logging.info("starting run_training")
-  if FLAGS.coverage:
-    ckpt_path = os.path.join(FLAGS.log_root, "train", "model.ckpt_cov")
-  else:
-    ckpt_path = os.path.join(FLAGS.log_root, "train", "model.ckpt")
+  ckpt_path = os.path.join(FLAGS.log_root, "train", "model.ckpt_cov")
 
   with sess_context_manager as sess:
     if FLAGS.pretrained_selector_path:
@@ -133,7 +101,6 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer, \
     if FLAGS.pretrained_rewriter_path:
       tf.logging.info('Loading rewriter model')
       _ = util.load_ckpt(rewriter_saver, sess, ckpt_path=FLAGS.pretrained_rewriter_path)
-
 
     for _ in range(FLAGS.max_train_iter): # repeats until interrupted
       batch = batcher.next_batch()
@@ -146,14 +113,12 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer, \
 
       loss = results['loss']
       tf.logging.info('loss: %f', loss) # print the loss to screen
+      train_step = results['global_step']
 
       if not np.isfinite(loss):
         raise Exception("Loss is not finite. Stopping.")
 
-      train_step = results['global_step'] # we need this to update our running average loss
-
-      if FLAGS.pointer_gen:
-        tf.logging.info("pgen_avg: %f", results['p_gen_avg'])
+      tf.logging.info("pgen_avg: %f", results['p_gen_avg'])
 
       if FLAGS.coverage:
         tf.logging.info("coverage_loss: %f", results['coverage_loss']) # print the coverage loss to screen
@@ -161,22 +126,8 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer, \
       if FLAGS.inconsistent_loss:
         tf.logging.info('inconsistent_loss: %f', results['inconsist_loss'])
 
-      if FLAGS.selector_loss_in_end2end:
-        tf.logging.info("selector_loss: %f", results['selector_loss'])
-        if FLAGS.loss == 'PG':
-          if FLAGS.regu_ratio_wt > 0.0:
-            tf.logging.info('selector_ratio loss: %f', results['ratio_loss'])
-            #tf.logging.info('total loss: %f', results['selector_total_loss'])
-          write_to_summary(results['sample']['avg_reward'], 'SentSelector/reward', train_step, summary_writer)
-          write_to_summary(results['sample']['avg_ratio'], 'SentSelector/select_ratio/sample', train_step, summary_writer)
-          write_to_summary(results['sample']['avg_gt_recall'], 'SentSelector/gt_recall/sample', train_step, summary_writer)
-          tf.logging.info('Sample, reward: %f, ratio: %f, gt_recall: %f' % (results['sample']['avg_reward'], results['sample']['avg_ratio'], results['sample']['avg_gt_recall']))
-          write_to_summary(results['running_avg_reward'], 'SentSelector/running_avg_reward/sample/decay=0.990000', train_step, summary_writer)
-          tf.logging.info('running_avg_reward: %f', results['running_avg_reward'])
-
+      tf.logging.info("selector_loss: %f", results['selector_loss'])
       recall, ratio, _ = util.get_batch_ratio(batch.original_articles_sents, batch.original_extracts_ids, results['probs'], target_recall=0.9)
-      if recall < 0.89 or recall > 0.91:
-        ratio = 1.0
       write_to_summary(ratio, 'SentSelector/select_ratio/recall=0.9', train_step, summary_writer)
 
       # get the summaries and iteration number so we can write summaries to tensorboard
@@ -190,7 +141,6 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer, \
           all_saver.save(sess, ckpt_path, global_step=train_step)
         else:
           sv.saver.save(sess, ckpt_path, global_step=train_step)
-
 
       print 'Step: ', train_step
 
@@ -209,20 +159,9 @@ def run_eval(model, batcher):
   running_avg_ratio = 0 # the eval job keeps a smoother, running average loss to tell it when to implement early stopping
   best_loss = None  # will hold the best loss achieved so far
   train_dir = os.path.join(FLAGS.log_root, "train")
-  first_eval_step = True
 
   while True:
     ckpt_state = tf.train.get_checkpoint_state(train_dir)
-    '''
-    if ckpt_state:
-      step = int(os.path.basename(ckpt_state.model_checkpoint_path).split('-')[1])
-
-      if first_eval_step:
-        final_step = (int(step/FLAGS.max_train_iter) + 1) * FLAGS.max_train_iter
-        first_eval_step = False
-      if step == final_step:
-        break
-    '''
     tf.logging.info('max_enc_steps: %d, max_dec_steps: %d', FLAGS.max_enc_steps, FLAGS.max_dec_steps)
     _ = util.load_ckpt(saver, sess) # load a new checkpoint
     batch = batcher.next_batch() # get the next batch
@@ -238,8 +177,7 @@ def run_eval(model, batcher):
     tf.logging.info('loss: %f', loss)
     train_step = results['global_step']
 
-    if FLAGS.pointer_gen:
-      tf.logging.info("pgen_avg: %f", results['p_gen_avg'])
+    tf.logging.info("pgen_avg: %f", results['p_gen_avg'])
 
     if FLAGS.coverage:
       tf.logging.info("coverage_loss: %f", results['coverage_loss'])
@@ -247,24 +185,8 @@ def run_eval(model, batcher):
     if FLAGS.inconsistent_loss:
       tf.logging.info('inconsistent_loss: %f', results['inconsist_loss'])
 
-    if FLAGS.selector_loss_in_end2end:
-      tf.logging.info("selector_loss: %f", results['selector_loss'])
-      if FLAGS.loss == 'PG':
-        if FLAGS.regu_ratio_wt > 0.0:
-          tf.logging.info('ratio loss: %f', results['ratio_loss'])
-          tf.logging.info('selector total loss: %f', results['selector_total_loss'])
-        write_to_summary(results['sample']['avg_reward'], 'SentSelector/reward', train_step, summary_writer)
-        write_to_summary(results['sample']['avg_ratio'], 'SentSelector/select_ratio/sample', train_step, summary_writer)
-        write_to_summary(results['sample']['avg_gt_recall'], 'SentSelector/gt_recall/sample', train_step, summary_writer)
-        tf.logging.info('Sample, reward: %f, ratio: %f, gt_recall: %f' % (results['sample']['avg_reward'], results['sample']['avg_ratio'], results['sample']['avg_gt_recall']))
-        write_to_summary(results['argmax']['avg_reward'], 'SentSelector/reward/argmax', train_step, summary_writer)
-        write_to_summary(results['argmax']['avg_ratio'], 'SentSelector/select_ratio/argmax', train_step, summary_writer)
-        write_to_summary(results['argmax']['avg_gt_recall'], 'SentSelector/gt_recall/argmax', train_step, summary_writer)
-        tf.logging.info('Argmax, reward: %f, ratio: %f, gt_recall: %f' % (results['argmax']['avg_reward'], results['argmax']['avg_ratio'], results['argmax']['avg_gt_recall']))
-
+    tf.logging.info("selector_loss: %f", results['selector_loss'])
     recall, ratio, _ = util.get_batch_ratio(batch.original_articles_sents, batch.original_extracts_ids, results['probs'], target_recall=0.9)
-    if recall < 0.89 or recall > 0.91:
-      ratio = 1.0
     write_to_summary(ratio, 'SentSelector/select_ratio/recall=0.9', train_step, summary_writer)
 
     # add summaries

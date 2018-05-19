@@ -11,6 +11,7 @@ MAX_TO_KEEP=30
 EVAL_METHOD='rouge'
 DECODE_METHOD='greedy'
 START_EVAL=8000
+SINGLE_PASS=True
 
 
 #################
@@ -41,7 +42,7 @@ then
   python main.py --model=rewriter --mode=train --data_path=$TRAIN_PATH --vocab_path=$VOCAB_PATH --log_root=log --exp_name=$EXP_NAME --max_enc_steps=400 --max_dec_steps=100 --max_train_iter=1000 --save_model_every=200 --coverage=True --model_max_to_keep=$MAX_TO_KEEP
 elif [ "$MODE" = "eval" ]
 then
-  python main.py --model=rewriter --mode=eval --data_path=$VAL_PATH --vocab_path=$VOCAB_PATH --log_root=log --exp_name=$EXP_NAME --max_enc_steps=400 --max_dec_steps=120 --coverage=True --batch_size=64 --eval_method=$EVAL_METHOD --decode_method=$DECODE_METHOD --start_eval_rouge=$START_EVAL --save_model_every=$SAVE_MODEL_EVERY --single_pass=1
+  python main.py --model=rewriter --mode=eval --data_path=$VAL_PATH --vocab_path=$VOCAB_PATH --log_root=log --exp_name=$EXP_NAME --max_enc_steps=400 --max_dec_steps=120 --coverage=True --batch_size=64 --eval_method=$EVAL_METHOD --decode_method=$DECODE_METHOD --start_eval_rouge=$START_EVAL --save_model_every=$SAVE_MODEL_EVERY --single_pass=$SINGLE_PASS
 elif [ "$MODE" = "evalall" ]
 then
   # decode

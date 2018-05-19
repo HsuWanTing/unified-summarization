@@ -107,14 +107,6 @@ class BeamSearchDecoder(object):
     t0 = time.time()
     counter = 0
 
-    '''
-    rouge_dir = './log/cnn_dailymail/decode_test_400maxenc_4beam_35mindec_100maxdec_ckpt-111000/'
-    print('Start rouge eval. Dir: ', rouge_dir)
-    results_dict = rouge_eval(rouge_dir + 'reference', rouge_dir + 'decoded')
-    rouge_log(results_dict, rouge_dir)
-    return
-    '''
-
     while True:
       batch = self._batcher.next_batch()  # 1 example repeated across batch
       if batch is None: # finished decoding dataset in single_pass mode
@@ -127,21 +119,14 @@ class BeamSearchDecoder(object):
         tf.logging.info("evaluation time: %.3f min", (t1-t0)/60.0)
         return rouge_results, rouge_results_str
 
-      '''
-      if counter < 9695:
-        counter += 1
-        continue
-      '''
-
       if FLAGS.decode_method == 'greedy':
         output_ids = self._model.run_greedy_search(self._sess, batch)
         for i in range(FLAGS.batch_size):
           self.process_one_article(batch.original_articles_sents[i], batch.original_abstracts_sents[i], \
                                    batch.original_extracts_ids[i], output_ids[i], \
-                                   (batch.art_oovs[i] if FLAGS.pointer_gen else None), \
-                                   None, None, None, counter)
+                                   batch.art_oovs[i], None, None, None, counter)
           counter += 1
-      else:
+      elif FLAGS.decode_method == 'beam':
         # Run beam search to get best Hypothesis
         best_hyp = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
 
@@ -149,8 +134,7 @@ class BeamSearchDecoder(object):
         output_ids = [int(t) for t in best_hyp.tokens[1:]]    # remove start token
         best_hyp.log_probs = best_hyp.log_probs[1:]   # remove start token probability
         self.process_one_article(batch.original_articles_sents[0], batch.original_abstracts_sents[0], \
-                                 batch.original_extracts_ids[0], output_ids, \
-                                 (batch.art_oovs[0] if FLAGS.pointer_gen else None), \
+                                 batch.original_extracts_ids[0], output_ids, batch.art_oovs[0], \
                                  best_hyp.attn_dists, best_hyp.p_gens, best_hyp.log_probs, counter)
         counter += 1
 
@@ -242,8 +226,7 @@ class BeamSearchDecoder(object):
         'attn_dists': attn_dists,
         'probs': np.exp(log_probs).tolist()
     }
-    if FLAGS.pointer_gen:
-      to_write['p_gens'] = p_gens
+    to_write['p_gens'] = p_gens
     if count != None:
       output_fname = os.path.join(self._rouge_vis_dir, 'attn_vis_data_%06d.json' % count)
     else:
