@@ -79,16 +79,14 @@ class Example(object):
       self.dec_input, self.target = self.get_dec_inp_targ_seqs(abs_ids, hps.max_dec_steps, start_decoding, stop_decoding)
       self.dec_len = len(self.dec_input)
 
-      # If using pointer-generator mode, we need to store some extra info
-      if hps.pointer_gen:
-        # Store a version of the enc_input where in-article OOVs are represented by their temporary OOV id; also store the in-article OOVs words themselves
-        self.enc_input_extend_vocab, self.article_oovs = data.article2ids(enc_input_words, vocab)
+      # Store a version of the enc_input where in-article OOVs are represented by their temporary OOV id; also store the in-article OOVs words themselves
+      self.enc_input_extend_vocab, self.article_oovs = data.article2ids(enc_input_words, vocab)
 
-        # Get a verison of the reference summary where in-article OOVs are represented by their temporary article OOV id
-        abs_ids_extend_vocab = data.abstract2ids(abstract_words, vocab, self.article_oovs)
+      # Get a verison of the reference summary where in-article OOVs are represented by their temporary article OOV id
+      abs_ids_extend_vocab = data.abstract2ids(abstract_words, vocab, self.article_oovs)
 
-        # Overwrite decoder target sequence so it uses the temp article OOV ids
-        _, self.target = self.get_dec_inp_targ_seqs(abs_ids_extend_vocab, hps.max_dec_steps, start_decoding, stop_decoding)
+      # Overwrite decoder target sequence so it uses the temp article OOV ids
+      _, self.target = self.get_dec_inp_targ_seqs(abs_ids_extend_vocab, hps.max_dec_steps, start_decoding, stop_decoding)
 
     if hps.model in ['selector', 'end2end']:
       # Process the article
@@ -147,9 +145,8 @@ class Example(object):
     """For rewriter, pad the encoder input sequence with pad_id up to max_len."""
     while len(self.enc_input) < max_len:
       self.enc_input.append(pad_id)
-    if self.hps.pointer_gen:
-      while len(self.enc_input_extend_vocab) < max_len:
-        self.enc_input_extend_vocab.append(pad_id)
+    while len(self.enc_input_extend_vocab) < max_len:
+      self.enc_input_extend_vocab.append(pad_id)
     if self.hps.model == 'end2end':
       while len(self.enc_input_sent_ids) < max_len:
         self.enc_input_sent_ids.append(-1)
@@ -187,26 +184,23 @@ class Batch(object):
       self.init_rewriter_decoder_seq(example_list, hps) # initialize the input and targets for the rewriter decoder
     if hps.model in ['selector', 'end2end']:
       self.init_selector_encoder_seq(example_list, hps) # initialize the input to the selector encoder
-      if hps.loss != 'PG':
-        if hps.model == 'selector' or (hps.model == 'end2end' and hps.selector_loss_in_end2end):
-          self.init_selector_target(example_list, hps) # initialize the target to selector
+      self.init_selector_target(example_list, hps) # initialize the target to selector
     self.store_orig_strings(example_list) # store the original strings
 
   def init_rewriter_encoder_seq(self, example_list, hps):
     """Initializes the following:
-        self.enc_batch:
+      self.enc_batch:
           numpy array of shape (batch_size, <=max_enc_steps) containing integer ids (all OOVs represented by UNK id), padded to length of longest sequence in the batch
-        self.enc_lens:
+      self.enc_lens:
           numpy array of shape (batch_size) containing integers. The (truncated) length of each encoder input sequence (pre-padding).
       self.enc_padding_mask:
           numpy array of shape (batch_size, <=max_enc_steps), containing 1s and 0s. 1s correspond to real tokens in enc_batch and target_batch; 0s correspond to padding.
 
-      If hps.pointer_gen, additionally initializes the following:
-        self.max_art_oovs:
+      self.max_art_oovs:
           maximum number of in-article OOVs in the batch
-        self.art_oovs:
+      self.art_oovs:
           list of list of in-article OOVs (strings), for each example in the batch
-        self.enc_batch_extend_vocab:
+      self.enc_batch_extend_vocab:
           Same as self.enc_batch, but in-article OOVs are represented by their temporary article OOV number.
     """
     # Determine the maximum length of the encoder input sequence in this batch
@@ -233,16 +227,14 @@ class Batch(object):
       for j in xrange(ex.enc_len):
         self.enc_padding_mask[i][j] = 1
 
-    # For pointer-generator mode, need to store some extra info
-    if hps.pointer_gen:
-      # Determine the max number of in-article OOVs in this batch
-      self.max_art_oovs = max([len(ex.article_oovs) for ex in example_list])
-      # Store the in-article OOVs themselves
-      self.art_oovs = [ex.article_oovs for ex in example_list]
-      # Store the version of the enc_batch that uses the article OOV ids
-      self.enc_batch_extend_vocab = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
-      for i, ex in enumerate(example_list):
-        self.enc_batch_extend_vocab[i, :] = ex.enc_input_extend_vocab[:]
+    # Determine the max number of in-article OOVs in this batch
+    self.max_art_oovs = max([len(ex.article_oovs) for ex in example_list])
+    # Store the in-article OOVs themselves
+    self.art_oovs = [ex.article_oovs for ex in example_list]
+    # Store the version of the enc_batch that uses the article OOV ids
+    self.enc_batch_extend_vocab = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
+    for i, ex in enumerate(example_list):
+      self.enc_batch_extend_vocab[i, :] = ex.enc_input_extend_vocab[:]
 
   def init_rewriter_decoder_seq(self, example_list, hps):
     """Initializes the following:
