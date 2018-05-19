@@ -9,7 +9,6 @@ This is the official codes for the paper: [A Unified Model for Extractive and Ab
 * [Standford CoreNLP 3.7.0](https://stanfordnlp.github.io/CoreNLP/) (for data preprocessing)
 * [NLTK](https://www.nltk.org/) (for data preprocessing)
 * [pyrouge](https://pypi.org/project/pyrouge/) (for evaluation)
-* matplotlib
 * tqdm
 
 **Note**: Stanford CoreNLP 3.7.0 can be downloaded from [here](http://nlp.stanford.edu/software/stanford-corenlp-full-2016-10-31.zip).
