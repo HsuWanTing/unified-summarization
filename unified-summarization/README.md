@@ -73,3 +73,20 @@ The current best models will be saved in `log/${MODEL}/${YOUR_EXP_NAME}/eval_${D
 Change the `MODE` in the script to `evalall` (i.e., `MODE='evalall'`) and set the `CKPT_PATH` as the model path that you want to test. 
 
 
+## Our test set outputs
+
+Test set outputs of our unified model can be download from [here](https://hsuwanting.github.io/unified_summ/unified_test_output.zip).
+
+Each pickle file (e.g., `result_000000.pkl`) contains the output of one article.
+
+The output format is a dictionary:
+
+```
+{
+    'article': list of article sentences,
+    'reference': list of reference summary sentences,
+    'gt_ids': indices of ground-truth extracted sentences,
+    'decoded': list of output summary sentences
+}
+```
+
