@@ -22,8 +22,6 @@ import time
 import numpy as np
 import tensorflow as tf
 from tensorflow.contrib.tensorboard.plugins import projector
-import rouge_not_a_wrapper as my_rouge
-import pdb
 
 FLAGS = tf.app.flags.FLAGS
 
