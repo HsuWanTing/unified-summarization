@@ -47,13 +47,15 @@ The trained models will be saved in `log/rewriter/${YOUR_EXP_NAME}` directory.
 
 ### End-to-end training the unified model
 
-Set the path of pretrained extractor and abstractor to `SELECTOR_PATH` and `REWRITER_PATH` in line 18 and 19.
+Set the path of pretrained extractor and abstractor to `SELECTOR_PATH` and `REWRITER_PATH` in the script.
 
 ```
 sh scripts/end2end.sh
 ```
 
 The trained models will be saved in `log/end2end/${YOUR_EXP_NAME}` directory.
+
+**Note**: In our paper, we use the best extractor model on validation set for the pretrained extractor and the last abstracter model (after training with coverage mechanism for 1k iterations) for the pretrained abstracter in end-to-end training.
 
 ## How to evaluate (concurrent)
 
@@ -70,7 +72,13 @@ The current best models will be saved in `log/${MODEL}/${YOUR_EXP_NAME}/eval_${D
 
 ## How to evaluate with ROUGE on test set
 
-Change the `MODE` in the script to `evalall` (i.e., `MODE='evalall'`) and set the `CKPT_PATH` as the model path that you want to test. 
+Change the `MODE` in the script to `evalall` (i.e., `MODE='evalall'`) and set `CKPT_PATH` as the model path that you want to test.
+
+If you want to use the best evaluation model, set `LOAD_BEST_VAL_MODEL` or `LOAD_BEST_TEST_MODEL` as `True` to load the best model in `eval_val(_${EVAL_METHOD})` or `eval_test(_${EVAL_METHOD})` directory. The default of `LOAD_BEST_VAL_MODEL` and `LOAD_BEST_TEST_MODEL` are `False`.
+
+If you didn't set the `CKPT_PATH` or turn on `LOAD_BEST_VAL(TEST)_MODEL`, it will automatically load the latest model in `train` directory.
+
+The evalutation results will be saved under the directory `log/${MODEL}/${YOUR_EXP_NAME}/`
 
 
 ## Our test set outputs
