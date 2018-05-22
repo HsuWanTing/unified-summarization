@@ -59,10 +59,10 @@ class BeamSearchDecoder(object):
     if FLAGS.mode == 'evalall':
       if FLAGS.load_best_val_model:
         tf.logging.info('Loading best val checkpoint')
-        ckpt_path = util.load_ckpt(self._saver, self._sess, ckpt_dir='eval_val')
+        ckpt_path = util.load_ckpt(self._saver, self._sess, ckpt_dir='eval_val_'+FLAGS.eval_method)
       elif FLAGS.load_best_test_model:
         tf.logging.info('Loading best test checkpoint')
-        ckpt_path = util.load_ckpt(self._saver, self._sess, ckpt_dir='eval_test')
+        ckpt_path = util.load_ckpt(self._saver, self._sess, ckpt_dir='eval_test_'+FLAGS.eval_method)
       elif FLAGS.eval_ckpt_path:
         ckpt_path = util.load_ckpt(self._saver, self._sess, ckpt_path=FLAGS.eval_ckpt_path)
       else:

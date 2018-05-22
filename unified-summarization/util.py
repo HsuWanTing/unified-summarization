@@ -119,7 +119,7 @@ def get_select_accuracy_one_thres(article_sents, probs, gt_selected_ids, thres, 
 
 
 def get_select_AP(article_sents, probs, gt_selected_ids, step=0.1, method='prob'):
-  "method can be prob/ratio"
+  """method can be prob/ratio"""
   select_num = []
   precision = []
   recall = []
@@ -189,7 +189,7 @@ def get_batch_precision_recall(batch_article_sents, batch_gt_ids, batch_probs, s
 
   return sent_nums, precisions, recalls, accuracys, ratios, avg_ps, avg_rs, avg_accs
 
-def get_batch_ratio(batch_article_sents, batch_gt_ids, batch_probs, target_recall=0.9, method='prob', tf_print=True):
+def get_batch_ratio(batch_article_sents, batch_gt_ids, batch_probs, target_recall=0.85, method='prob', tf_print=True):
   batch_size = len(batch_article_sents)
   max_recall = target_recall + 0.01
   min_recall = target_recall - 0.01
@@ -235,7 +235,7 @@ def get_batch_ratio(batch_article_sents, batch_gt_ids, batch_probs, target_recal
 
   if recall < min_recall or recall > max_recall:
     if tf_print:
-      tf.logging.warning('fail to reach target recall')      
+      tf.logging.warning('fail to reach target recall: '+str(target_recall))      
     recall = 0.0
     thres = 0.0
     ratio = 1.0

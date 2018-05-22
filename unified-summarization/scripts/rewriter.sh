@@ -1,21 +1,25 @@
-TRAIN_PATH='data/CNN_Dailymail/finished_files/chunked/train_*'
-VAL_PATH='data/CNN_Dailymail/finished_files/chunked/val_*'
-TEST_PATH='data/CNN_Dailymail/finished_files/chunked/test_*'
-VOCAB_PATH='data/CNN_Dailymail/finished_files/vocab'
+TRAIN_PATH='data_cedl/finished_files/chunked/train_*'
+VAL_PATH='data_cedl/finished_files/chunked/val_*'
+TEST_PATH='data_cedl/finished_files/chunked/test_*'
+VOCAB_PATH='data_cedl/finished_files/vocab'
 EXP_NAME='xxxx'
 MAX_ITER=10000
 SAVE_MODEL_EVERY=1000
-MAX_TO_KEEP=30
+MAX_TO_KEEP=5
 
 # for eval mode
 EVAL_METHOD='rouge'
 DECODE_METHOD='greedy'
 START_EVAL=8000
-SINGLE_PASS=True
+SINGLE_PASS=True  # if evaluating by loss, change singel_pass to False
 
+# for evalall mode
+LOAD_BEST_VAL_MODEL=True
+LOAD_BEST_TEST_MODEL=False
+CKPT_PATH=''
 
 #################
-MODE='train'
+MODE='evalall'
 #################
 
 
@@ -42,9 +46,9 @@ then
   python main.py --model=rewriter --mode=train --data_path=$TRAIN_PATH --vocab_path=$VOCAB_PATH --log_root=log --exp_name=$EXP_NAME --max_enc_steps=400 --max_dec_steps=100 --max_train_iter=1000 --save_model_every=200 --coverage=True --model_max_to_keep=$MAX_TO_KEEP
 elif [ "$MODE" = "eval" ]
 then
-  python main.py --model=rewriter --mode=eval --data_path=$VAL_PATH --vocab_path=$VOCAB_PATH --log_root=log --exp_name=$EXP_NAME --max_enc_steps=400 --max_dec_steps=120 --coverage=True --batch_size=64 --eval_method=$EVAL_METHOD --decode_method=$DECODE_METHOD --start_eval_rouge=$START_EVAL --save_model_every=$SAVE_MODEL_EVERY --single_pass=$SINGLE_PASS
+  python main.py --model=rewriter --mode=eval --data_path=$VAL_PATH --vocab_path=$VOCAB_PATH --log_root=log --exp_name=$EXP_NAME --max_enc_steps=400 --max_dec_steps=120 --coverage=False --batch_size=64 --eval_method=$EVAL_METHOD --decode_method=$DECODE_METHOD --start_eval_rouge=$START_EVAL --save_model_every=$SAVE_MODEL_EVERY --single_pass=$SINGLE_PASS
 elif [ "$MODE" = "evalall" ]
 then
   # decode
-  python main.py --model=rewriter --mode=evalall --data_path=$TEST_PATH --vocab_path=$VOCAB_PATH --log_root=log --exp_name=$EXP_NAME --max_enc_steps=400 --max_dec_steps=120 --coverage=True --decode_method=beam --single_pass=1
+  python main.py --model=rewriter --mode=evalall --data_path=$TEST_PATH --vocab_path=$VOCAB_PATH --log_root=log --exp_name=$EXP_NAME --max_enc_steps=400 --max_dec_steps=120 --coverage=True --decode_method=beam --single_pass=1 --eval_method=$EVAL_METHOD --load_best_val_model=$LOAD_BEST_VAL_MODEL --load_best_test_model=$LOAD_BEST_VAL_MODEL --eval_ckpt_path=$CKPT_PATH
 fi

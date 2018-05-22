@@ -66,9 +66,9 @@ tf.app.flags.DEFINE_integer('start_eval_rouge', 30000, 'for rouge mode, start ev
 
 # For evalall mode or (eval mode with eval_method == 'rouge')
 tf.app.flags.DEFINE_string('decode_method', '', 'greedy/beam')
-tf.app.flags.DEFINE_boolean('load_best_val_model', False, '')
-tf.app.flags.DEFINE_boolean('load_best_test_model', False, '')
-tf.app.flags.DEFINE_string('eval_ckpt_path', '', 'checkpoint path for evalall mode')
+tf.app.flags.DEFINE_boolean('load_best_val_model', False, 'evalall mode only')
+tf.app.flags.DEFINE_boolean('load_best_test_model', False, 'evalall mode only')
+tf.app.flags.DEFINE_string('eval_ckpt_path', '', 'evalall mode only, checkpoint path for evalall mode')
 tf.app.flags.DEFINE_boolean('save_pkl', False, 'whether to save the results as pickle files')
 tf.app.flags.DEFINE_boolean('save_vis', False, 'whether to save the results for visualization')
 
@@ -77,7 +77,6 @@ tf.app.flags.DEFINE_string('pretrained_selector_path', '', 'pretrained selector 
 tf.app.flags.DEFINE_string('pretrained_rewriter_path', '', 'pretrained rewriter checkpoint path')
 
 # For end2end training
-#tf.app.flags.DEFINE_boolean('selector_loss_in_end2end', True, 'whether to minimize selector loss when end2end')
 tf.app.flags.DEFINE_float('selector_loss_wt', 5.0, 'weight of selector loss when end2end')
 tf.app.flags.DEFINE_boolean('inconsistent_loss', True, 'whether to minimize inconsistent loss when end2end')
 tf.app.flags.DEFINE_integer('inconsistent_topk', 3, 'choose top K word attention to compute inconsistent loss')
@@ -108,9 +107,6 @@ tf.app.flags.DEFINE_integer('max_enc_steps', 600, 'max timesteps of encoder (max
 tf.app.flags.DEFINE_integer('max_dec_steps', 100, 'max timesteps of decoder (max summary tokens)')
 tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_integer('min_dec_steps', 35, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
-
-# Pointer-generator or baseline model
-#tf.app.flags.DEFINE_boolean('pointer_gen', True, 'If True, use pointer-generator model. If False, use baseline model.')
 
 # Coverage hyperparameters
 tf.app.flags.DEFINE_boolean('coverage', False, 'Use coverage mechanism. Note, the experiments reported in the ACL paper train WITHOUT coverage until converged, and then train for a short phase WITH coverage afterwards. i.e. to reproduce the results in the ACL paper, turn this off for most of training then turn on for a short phase at the end.')

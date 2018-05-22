@@ -114,8 +114,7 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer,
       train_step = results['global_step'] # we need this to update our running average loss
 
       recall, ratio, _ = util.get_batch_ratio(batch.original_articles_sents, \
-                                              batch.original_extracts_ids, \
-                                              results['probs'], target_recall=0.9)
+                                              batch.original_extracts_ids, results['probs'])
       write_to_summary(ratio, 'SentSelector/select_ratio/recall=0.9', train_step, summary_writer)
       
       # get the summaries and iteration number so we can write summaries to tensorboard
@@ -167,8 +166,7 @@ def run_eval(model, batcher):
     train_step = results['global_step']
 
     recall, ratio, _ = util.get_batch_ratio(batch.original_articles_sents, \
-                                            batch.original_extracts_ids, \
-                                            results['probs'], target_recall=0.9)
+                                            batch.original_extracts_ids, results['probs'])
     write_to_summary(ratio, 'SentSelector/select_ratio/recall=0.9', train_step, summary_writer)
     
     # add summaries

@@ -127,7 +127,7 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer, \
         tf.logging.info('inconsistent_loss: %f', results['inconsist_loss'])
 
       tf.logging.info("selector_loss: %f", results['selector_loss'])
-      recall, ratio, _ = util.get_batch_ratio(batch.original_articles_sents, batch.original_extracts_ids, results['probs'], target_recall=0.9)
+      recall, ratio, _ = util.get_batch_ratio(batch.original_articles_sents, batch.original_extracts_ids, results['probs'])
       write_to_summary(ratio, 'SentSelector/select_ratio/recall=0.9', train_step, summary_writer)
 
       # get the summaries and iteration number so we can write summaries to tensorboard
@@ -186,7 +186,7 @@ def run_eval(model, batcher):
       tf.logging.info('inconsistent_loss: %f', results['inconsist_loss'])
 
     tf.logging.info("selector_loss: %f", results['selector_loss'])
-    recall, ratio, _ = util.get_batch_ratio(batch.original_articles_sents, batch.original_extracts_ids, results['probs'], target_recall=0.9)
+    recall, ratio, _ = util.get_batch_ratio(batch.original_articles_sents, batch.original_extracts_ids, results['probs'])
     write_to_summary(ratio, 'SentSelector/select_ratio/recall=0.9', train_step, summary_writer)
 
     # add summaries
