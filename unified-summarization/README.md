@@ -80,7 +80,7 @@ If you didn't set the `CKPT_PATH` or turn on `LOAD_BEST_EVAL_MODEL`, it will aut
 
 The evalutation results will be saved under your experiment directory `log/${MODEL}/${YOUR_EXP_NAME}/`.
 
-## Expected Results
+## Expected results
 
 By following the scripts we provided, you should get the performance as below:
 
@@ -104,6 +104,14 @@ By following the scripts we provided, you should get the performance as below:
 
 
 **Note**: Our abstracter takes ground-truth extracted sentences as input when both training and testing, so the ROUGE F-1 scores are higher than the unified model.
+
+## Our models
+
+We provide our models used in the paper:
+
+* [Extractor](https://hsuwanting.github.io/unified_summ/extractor_model.zip)
+* [Abstracter](https://hsuwanting.github.io/unified_summ/abstracter_model.zip)
+* [Unified model](https://hsuwanting.github.io/unified_summ/unified_model.zip)
 
 
 ## Our test set outputs
