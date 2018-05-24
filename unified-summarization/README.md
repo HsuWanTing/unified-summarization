@@ -105,9 +105,9 @@ By following the scripts we provided, you should get the performance as below:
 
 **Note**: Our abstracter takes ground-truth extracted sentences as input when both training and testing, so the ROUGE F-1 scores are higher than the unified model.
 
-## Our models
+## Our pretrained models
 
-We provide our models used in the paper:
+We provide our pretrained models as the following:
 
 * [Extractor](https://hsuwanting.github.io/unified_summ/extractor_model.zip)
 * [Abstracter](https://hsuwanting.github.io/unified_summ/abstracter_model.zip)
