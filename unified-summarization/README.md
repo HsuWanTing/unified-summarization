@@ -78,7 +78,32 @@ If you want to use the best evaluation model, set `LOAD_BEST_VAL_MODEL` or `LOAD
 
 If you didn't set the `CKPT_PATH` or turn on `LOAD_BEST_VAL(TEST)_MODEL`, it will automatically load the latest model in `train` directory.
 
-The evalutation results will be saved under the directory `log/${MODEL}/${YOUR_EXP_NAME}/`
+The evalutation results will be saved under your experiment directory `log/${MODEL}/${YOUR_EXP_NAME}/`.
+
+## Expected Results
+
+By following the scripts we provided, you should get the performance as below:
+
+### Extractor (best evaluation model)
+
+| ROUGE-1 recall | ROUGE-1 recall |ROUGE-1 recall| 
+|:----------:|:---------:|:-----------:|
+|   73.5     |    35.6   |   68.6    |
+
+### Abstracter (model of 81000 iteration)
+
+| ROUGE-1 F-1 score | ROUGE-1 F-1 score |ROUGE-1 F-1 score| 
+|:----------:|:---------:|:-----------:|
+|     45.4   |    21.8   |   42.1   |
+
+### Unified model with inconsistency loss (best evaluation model)
+
+| ROUGE-1 F-1 score | ROUGE-1 F-1 score |ROUGE-1 F-1 score| 
+|:----------:|:---------:|:-----------:|
+|     40.68   |    17.97   |   37.13   |
+
+
+**Note**: Our abstracter takes ground-truth extracted sentences as input when both training and testing, so the ROUGE F-1 scores are higher than the unified model.
 
 
 ## Our test set outputs
