@@ -14,7 +14,7 @@ START_EVAL=8000
 SINGLE_PASS=True  # if evaluating by loss, change singel_pass to False
 
 # for evalall mode
-LOAD_BEST_VAL_MODEL=True
+LOAD_BEST_VAL_MODEL=False
 LOAD_BEST_TEST_MODEL=False
 CKPT_PATH=''
 
@@ -50,5 +50,5 @@ then
 elif [ "$MODE" = "evalall" ]
 then
   # decode
-  python main.py --model=rewriter --mode=evalall --data_path=$TEST_PATH --vocab_path=$VOCAB_PATH --log_root=log --exp_name=$EXP_NAME --max_enc_steps=400 --max_dec_steps=120 --coverage=True --decode_method=beam --single_pass=1 --eval_method=$EVAL_METHOD --load_best_val_model=$LOAD_BEST_VAL_MODEL --load_best_test_model=$LOAD_BEST_VAL_MODEL --eval_ckpt_path=$CKPT_PATH
+  python main.py --model=rewriter --mode=evalall --data_path=$TEST_PATH --vocab_path=$VOCAB_PATH --log_root=log --exp_name=$EXP_NAME --max_enc_steps=400 --max_dec_steps=120 --coverage=True --decode_method=beam --single_pass=1 --eval_method=$EVAL_METHOD --load_best_val_model=$LOAD_BEST_VAL_MODEL --load_best_test_model=$LOAD_BEST_TEST_MODEL --eval_ckpt_path=$CKPT_PATH
 fi

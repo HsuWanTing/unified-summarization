@@ -39,12 +39,9 @@ class End2EndEvaluator(object):
   def prepare_evaluate(self, ckpt_path=None):
     # Load an initial checkpoint to use for decoding
     if FLAGS.mode == 'evalall':
-      if FLAGS.load_best_val_model:
-        tf.logging.info('Loading best val checkpoint')
-        ckpt_path = util.load_ckpt(self._saver, self._sess, ckpt_dir='eval_val')
-      elif FLAGS.load_best_test_model:
-        tf.logging.info('Loading best test checkpoint')
-        ckpt_path = util.load_ckpt(self._saver, self._sess, ckpt_dir='eval_test')
+      if FLAGS.load_best_eval_model:
+        tf.logging.info('Loading best eval checkpoint')
+        ckpt_path = util.load_ckpt(self._saver, self._sess, ckpt_dir='eval'+FLAGS.eval_method)
       elif FLAGS.eval_ckpt_path:
         ckpt_path = util.load_ckpt(self._saver, self._sess, ckpt_path=FLAGS.eval_ckpt_path)
       else:

@@ -66,8 +66,7 @@ tf.app.flags.DEFINE_integer('start_eval_rouge', 30000, 'for rouge mode, start ev
 
 # For evalall mode or (eval mode with eval_method == 'rouge')
 tf.app.flags.DEFINE_string('decode_method', '', 'greedy/beam')
-tf.app.flags.DEFINE_boolean('load_best_val_model', False, 'evalall mode only')
-tf.app.flags.DEFINE_boolean('load_best_test_model', False, 'evalall mode only')
+tf.app.flags.DEFINE_boolean('load_best_eval_model', False, 'evalall mode only')
 tf.app.flags.DEFINE_string('eval_ckpt_path', '', 'evalall mode only, checkpoint path for evalall mode')
 tf.app.flags.DEFINE_boolean('save_pkl', False, 'whether to save the results as pickle files')
 tf.app.flags.DEFINE_boolean('save_vis', False, 'whether to save the results for visualization')

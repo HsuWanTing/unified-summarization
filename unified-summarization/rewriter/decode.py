@@ -49,7 +49,7 @@ class BeamSearchDecoder(object):
     self._model.build_graph()
     self._batcher = batcher
     self._vocab = vocab
-    self._saver = tf.train.Saver(max_to_keep=3) # we use this to load checkpoints for decoding
+    self._saver = tf.train.Saver() # we use this to load checkpoints for decoding
     self._sess = tf.Session(config=util.get_config())
     if FLAGS.mode == 'evalall':
       self.prepare_evaluate()
@@ -57,12 +57,9 @@ class BeamSearchDecoder(object):
   def prepare_evaluate(self, ckpt_path=None):
     # Load an initial checkpoint to use for decoding
     if FLAGS.mode == 'evalall':
-      if FLAGS.load_best_val_model:
-        tf.logging.info('Loading best val checkpoint')
-        ckpt_path = util.load_ckpt(self._saver, self._sess, ckpt_dir='eval_val_'+FLAGS.eval_method)
-      elif FLAGS.load_best_test_model:
-        tf.logging.info('Loading best test checkpoint')
-        ckpt_path = util.load_ckpt(self._saver, self._sess, ckpt_dir='eval_test_'+FLAGS.eval_method)
+      if FLAGS.load_best_eval_model:
+        tf.logging.info('Loading best eval checkpoint')
+        ckpt_path = util.load_ckpt(self._saver, self._sess, ckpt_dir='eval_'+FLAGS.eval_method)
       elif FLAGS.eval_ckpt_path:
         ckpt_path = util.load_ckpt(self._saver, self._sess, ckpt_path=FLAGS.eval_ckpt_path)
       else:
@@ -74,7 +71,6 @@ class BeamSearchDecoder(object):
     if FLAGS.single_pass:
       # Make a descriptive decode directory name
       ckpt_name = "ckpt-" + ckpt_path.split('-')[-1] # this is something of the form "ckpt-123456"
-      #self._decode_dir = os.path.join(FLAGS.log_root, 'select_exp11', 'ckpt-54130', get_decode_dir_name(ckpt_name) + '_thres-0.4')
       self._decode_dir = os.path.join(FLAGS.log_root, get_decode_dir_name(ckpt_name))
       tf.logging.info('Save evaluation results to '+ self._decode_dir)
       if os.path.exists(self._decode_dir):

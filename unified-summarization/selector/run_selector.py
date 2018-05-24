@@ -137,9 +137,7 @@ def run_eval(model, batcher):
   model.build_graph() # build the graph
   saver = tf.train.Saver(max_to_keep=3) # we will keep 3 best checkpoints at a time
   sess = tf.Session(config=util.get_config())
-  if "val" in FLAGS.data_path: dataset = "val"
-  elif "test" in FLAGS.data_path: dataset = "test"
-  eval_dir = os.path.join(FLAGS.log_root, "eval_" + dataset) # make a subdir of the root dir for eval data
+  eval_dir = os.path.join(FLAGS.log_root, "eval") # make a subdir of the root dir for eval data
   bestmodel_save_path = os.path.join(eval_dir, 'bestmodel') # this is where checkpoints of best models are saved
   summary_writer = tf.summary.FileWriter(eval_dir)
 

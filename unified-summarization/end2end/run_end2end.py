@@ -150,9 +150,7 @@ def run_eval(model, batcher):
   model.build_graph() # build the graph
   saver = tf.train.Saver(max_to_keep=3) # we will keep 3 best checkpoints at a time
   sess = tf.Session(config=util.get_config())
-  if "val" in FLAGS.data_path: dataset = "val"
-  elif "test" in FLAGS.data_path: dataset = "test"
-  eval_dir = os.path.join(FLAGS.log_root, "eval_" + dataset) # make a subdir of the root dir for eval data
+  eval_dir = os.path.join(FLAGS.log_root, "eval_loss") # make a subdir of the root dir for eval data
   bestmodel_save_path = os.path.join(eval_dir, 'bestmodel') # this is where checkpoints of best models are saved
   summary_writer = tf.summary.FileWriter(eval_dir)
   running_avg_loss = 0 # the eval job keeps a smoother, running average loss to tell it when to implement early stopping
@@ -211,9 +209,7 @@ def run_eval(model, batcher):
 
 def run_eval_rouge(evaluator):
   """Repeatedly runs eval iterations, logging to screen and writing summaries. Saves the model with the best loss seen so far."""
-  if "val" in FLAGS.data_path: dataset = "val"
-  elif "test" in FLAGS.data_path: dataset = "test"
-  eval_dir = os.path.join(FLAGS.log_root, "eval_" + dataset + '_rouge') # make a subdir of the root dir for eval data
+  eval_dir = os.path.join(FLAGS.log_root, 'eval_rouge') # make a subdir of the root dir for eval data
   bestmodel_save_path = os.path.join(eval_dir, 'bestmodel') # this is where checkpoints of best models are saved
   summary_writer = tf.summary.FileWriter(eval_dir)
 
