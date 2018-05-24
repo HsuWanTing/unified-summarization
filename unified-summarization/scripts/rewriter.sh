@@ -1,8 +1,8 @@
-TRAIN_PATH='data_cedl/finished_files/chunked/train_*'
-VAL_PATH='data_cedl/finished_files/chunked/val_*'
-TEST_PATH='data_cedl/finished_files/chunked/test_*'
-VOCAB_PATH='data_cedl/finished_files/vocab'
-EXP_NAME='xxxx'
+TRAIN_PATH='data/finished_files/chunked/train_*'
+VAL_PATH='data/finished_files/chunked/val_*'
+TEST_PATH='data/finished_files/chunked/test_*'
+VOCAB_PATH='data/finished_files/vocab'
+EXP_NAME='exp_sample'
 MAX_ITER=10000
 SAVE_MODEL_EVERY=1000
 MAX_TO_KEEP=5
@@ -14,12 +14,11 @@ START_EVAL=8000
 SINGLE_PASS=True  # if evaluating by loss, change singel_pass to False
 
 # for evalall mode
-LOAD_BEST_VAL_MODEL=False
-LOAD_BEST_TEST_MODEL=False
+LOAD_BEST_EVAL_MODEL=False
 CKPT_PATH=''
 
 #################
-MODE='evalall'
+MODE='train'
 #################
 
 
@@ -50,5 +49,5 @@ then
 elif [ "$MODE" = "evalall" ]
 then
   # decode
-  python main.py --model=rewriter --mode=evalall --data_path=$TEST_PATH --vocab_path=$VOCAB_PATH --log_root=log --exp_name=$EXP_NAME --max_enc_steps=400 --max_dec_steps=120 --coverage=True --decode_method=beam --single_pass=1 --eval_method=$EVAL_METHOD --load_best_val_model=$LOAD_BEST_VAL_MODEL --load_best_test_model=$LOAD_BEST_TEST_MODEL --eval_ckpt_path=$CKPT_PATH
+  python main.py --model=rewriter --mode=evalall --data_path=$TEST_PATH --vocab_path=$VOCAB_PATH --log_root=log --exp_name=$EXP_NAME --max_enc_steps=400 --max_dec_steps=120 --coverage=True --decode_method=beam --single_pass=1 --eval_method=$EVAL_METHOD --load_best_eval_model=$LOAD_BEST_EVAL_MODEL --eval_ckpt_path=$CKPT_PATH
 fi

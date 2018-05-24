@@ -1,8 +1,8 @@
-TRAIN_PATH='data_cedl/finished_files/chunked/train_*'
-VAL_PATH='data_cedl/finished_files/chunked/val_*'
-TEST_PATH='data_cedl/finished_files/chunked/test_*'
-VOCAB_PATH='data_cedl/finished_files/vocab'
-EXP_NAME='xxxx'
+TRAIN_PATH='data/finished_files/chunked/train_*'
+VAL_PATH='data/finished_files/chunked/val_*'
+TEST_PATH='data/finished_files/chunked/test_*'
+VOCAB_PATH='data/finished_files/vocab'
+EXP_NAME='exp_sample'
 
 # for train mode
 MAX_ITER=30000
@@ -16,12 +16,11 @@ SELECT_METHOD='prob'
 MAX_SELECT=30
 THRES=0.5
 SAVE_PKL=True
-LOAD_BEST_VAL_MODEL=False
-LOAD_BEST_TEST_MODEL=False
-CKPT_PATH="log/selector/$EXP_NAME/eval_val/bestmodel-xxxx"
+LOAD_BEST_EVAL_MODEL=False
+CKPT_PATH="log/selector/$EXP_NAME/eval/bestmodel-xxxx"
 
 #################
-MODE='evalall'
+MODE='train'
 #################
 
 
@@ -33,5 +32,5 @@ then
   python main.py --model=selector --mode=eval --data_path=$VAL_PATH --vocab_path=$VOCAB_PATH --log_root=log --exp_name=$EXP_NAME --max_art_len=50 --max_sent_len=50 --batch_size=$BATCH_SIZE
 elif [ "$MODE" = "evalall" ]
 then
-  python main.py --model=selector --mode=evalall --data_path=$TEST_PATH --vocab_path=$VOCAB_PATH --log_root=log --exp_name=$EXP_NAME --max_art_len=50 --max_sent_len=50 --max_select_sent=$MAX_SELECT --single_pass=True --select_method=$SELECT_METHOD --thres=$THRES --save_pkl=$SAVE_PK --eval_ckpt_path=$CKPT_PATH --load_best_val_model=$LOAD_BEST_VAL_MODEL --load_best_test_model=$LOAD_BEST_VAL_MODEL
+  python main.py --model=selector --mode=evalall --data_path=$TEST_PATH --vocab_path=$VOCAB_PATH --log_root=log --exp_name=$EXP_NAME --max_art_len=50 --max_sent_len=50 --max_select_sent=$MAX_SELECT --single_pass=True --select_method=$SELECT_METHOD --thres=$THRES --save_pkl=$SAVE_PK --eval_ckpt_path=$CKPT_PATH --load_best_eval_model=$LOAD_BEST_EVAL_MODEL
 fi
