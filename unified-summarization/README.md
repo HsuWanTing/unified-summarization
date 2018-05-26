@@ -68,19 +68,19 @@ For the ROUGE evaluation, you can use greedy search or beam search. Just switch 
 We highly recommend you to use **greedy search** for concorrent ROUGE evaluation since greedy search is much faster than beam search.
 It takes about 30 minutes for greedy search and 7 hours for beam search on CNN/Daily Mail test set.
 
-The current best models will be saved in `log/${MODEL}/${YOUR_EXP_NAME}/eval_${DATA_SPLIT}(_${EVAL_METHOD})`.
+The current best models will be saved in `log/${MODEL}/${YOUR_EXP_NAME}/eval(_${EVAL_METHOD})`.
 
 ## How to evaluate with ROUGE on test set
 
 Change the `MODE` in the script to `evalall` (i.e., `MODE='evalall'`) and set `CKPT_PATH` as the model path that you want to test.
 
-If you want to use the best evaluation model, set `LOAD_BEST_VAL_MODEL` or `LOAD_BEST_TEST_MODEL` as `True` to load the best model in `eval_val(_${EVAL_METHOD})` or `eval_test(_${EVAL_METHOD})` directory. The default of `LOAD_BEST_VAL_MODEL` and `LOAD_BEST_TEST_MODEL` are `False`.
+If you want to use the best evaluation model, set `LOAD_BEST_EVAL_MODEL` as `True` to load the best model in `eval(_${EVAL_METHOD})` directory. The default of `LOAD_BEST_EVAL_MODEL` is `False`.
 
-If you didn't set the `CKPT_PATH` or turn on `LOAD_BEST_VAL(TEST)_MODEL`, it will automatically load the latest model in `train` directory.
+If you didn't set the `CKPT_PATH` or turn on `LOAD_BEST_EVAL_MODEL`, it will automatically load the latest model in `train` directory.
 
 The evalutation results will be saved under your experiment directory `log/${MODEL}/${YOUR_EXP_NAME}/`.
 
-## Expected Results
+## Expected results
 
 By following the scripts we provided, you should get the performance as below:
 
@@ -104,6 +104,14 @@ By following the scripts we provided, you should get the performance as below:
 
 
 **Note**: Our abstracter takes ground-truth extracted sentences as input when both training and testing, so the ROUGE F-1 scores are higher than the unified model.
+
+## Our pretrained models
+
+We provide our pretrained models as the following:
+
+* [Extractor](https://hsuwanting.github.io/unified_summ/extractor_model.zip)
+* [Abstracter](https://hsuwanting.github.io/unified_summ/abstracter_model.zip)
+* [Unified model](https://hsuwanting.github.io/unified_summ/unified_model.zip)
 
 
 ## Our test set outputs
