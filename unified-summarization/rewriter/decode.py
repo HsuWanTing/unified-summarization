@@ -49,7 +49,7 @@ class BeamSearchDecoder(object):
     self._model.build_graph()
     self._batcher = batcher
     self._vocab = vocab
-    self._saver = tf.train.Saver() # we use this to load checkpoints for decoding
+    self._saver = tf.train.Saver(max_to_keep=3) # we use this to load checkpoints for decoding
     self._sess = tf.Session(config=util.get_config())
     if FLAGS.mode == 'evalall':
       self.prepare_evaluate()

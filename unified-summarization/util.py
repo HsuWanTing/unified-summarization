@@ -189,7 +189,7 @@ def get_batch_precision_recall(batch_article_sents, batch_gt_ids, batch_probs, s
 
   return sent_nums, precisions, recalls, accuracys, ratios, avg_ps, avg_rs, avg_accs
 
-def get_batch_ratio(batch_article_sents, batch_gt_ids, batch_probs, target_recall=0.85, method='prob', tf_print=True):
+def get_batch_ratio(batch_article_sents, batch_gt_ids, batch_probs, target_recall=0.9, method='prob', tf_print=True):
   batch_size = len(batch_article_sents)
   max_recall = target_recall + 0.01
   min_recall = target_recall - 0.01

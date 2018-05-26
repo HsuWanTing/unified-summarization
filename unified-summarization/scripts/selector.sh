@@ -5,7 +5,7 @@ VOCAB_PATH='data/finished_files/vocab'
 EXP_NAME='exp_sample'
 
 # for train mode
-MAX_ITER=30000
+MAX_ITER=50000
 BATCH_SIZE=64
 SAVE_MODEL_EVERY=10
 MAX_TO_KEEP=3
