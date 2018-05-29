@@ -82,7 +82,7 @@ The evalutation results will be saved under your experiment directory `log/${MOD
 
 ## Expected results
 
-By following the scripts we provided, you should get the performance as below:
+By following the scripts we provided, you should get comparable performance as below:
 
 ### Extractor (best evaluation model)
 
