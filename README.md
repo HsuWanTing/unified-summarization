@@ -111,7 +111,7 @@ We provide our pretrained models as the following:
 
 * [Extractor](https://hsuwanting.github.io/unified_summ/extractor_model.zip)
 * [Abstracter](https://hsuwanting.github.io/unified_summ/abstracter_model.zip)
-* [Unified model](https://hsuwanting.github.io/unified_summ/unified_model.zip)
+* [Unified model](https://drive.google.com/open?id=1IoXIYRJlbeMve5Z7ga4d7E8BwmaHCVNl)
 
 
 ## Our test set outputs
