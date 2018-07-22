@@ -109,8 +109,8 @@ By following the scripts we provided, you should get comparable performance as b
 
 We provide our pretrained models as the following:
 
-* [Extractor](https://hsuwanting.github.io/unified_summ/extractor_model.zip)
-* [Abstracter](https://hsuwanting.github.io/unified_summ/abstracter_model.zip)
+* [Extractor](https://drive.google.com/open?id=1firO0H1V4wNgaheijz4rFCKwIUD4q299)
+* [Abstracter](https://drive.google.com/open?id=1I-_rV8HOebdtCDMYhPC5UzrUDWf9TUZ-)
 * [Unified model](https://drive.google.com/open?id=1IoXIYRJlbeMve5Z7ga4d7E8BwmaHCVNl)
 
 
