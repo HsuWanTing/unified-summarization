@@ -131,3 +131,15 @@ The output format is a dictionary:
 }
 ```
 
+## Citation
+
+If you find this repository useful, please cite:
+
+```
+@InProceedings{hsu2018unified,
+  title={A Unified Model for Extractive and Abstractive Summarization using Inconsistency Loss},
+  author={Hsu, Wan-Ting and Lin, Chieh-Kai and Lee, Ming-Ying and Min, Kerui and Tang, Jing and Sun, Min},
+  booktitle={Proceedings of the 56th Annual Meeting of the Association for Computational Linguistics},
+  year={2018}
+}
+```
