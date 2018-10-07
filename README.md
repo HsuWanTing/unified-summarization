@@ -116,7 +116,7 @@ We provide our pretrained models as the following:
 
 ## Our test set outputs
 
-Test set outputs of our unified model can be downloaded from [here](https://hsuwanting.github.io/unified_summ/unified_test_output.zip).
+Test set outputs of our unified model can be downloaded from [here](https://drive.google.com/open?id=1YtETyTrV_Lv7tz4cxLCugqt5ad7hV8G3).
 
 Each pickle file (e.g., `result_000000.pkl`) contains the output of one article.
 
