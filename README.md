@@ -113,6 +113,9 @@ We provide our pretrained models as the following:
 * [Abstracter](https://drive.google.com/open?id=1I-_rV8HOebdtCDMYhPC5UzrUDWf9TUZ-)
 * [Unified model](https://drive.google.com/open?id=1IoXIYRJlbeMve5Z7ga4d7E8BwmaHCVNl)
 
+If you want to get the results of the pretrained models, set two arguments in the scripts:
+1. set the `MODE` to `evalall` (i.e., `MODE='evalall'`).
+2. set the `CKPT_PATH` to our pretrained model (e.g., `CKPT_PATH="pretrained/bestmodel-xxxx"`).
 
 ## Our test set outputs
 
