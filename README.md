@@ -86,19 +86,19 @@ By following the scripts we provided, you should get comparable performance as b
 
 ### Extractor (best evaluation model)
 
-| ROUGE-1 recall | ROUGE-1 recall |ROUGE-1 recall| 
+| ROUGE-1 recall | ROUGE-2 recall |ROUGE-L recall| 
 |:----------:|:---------:|:-----------:|
 |   73.5     |    35.6   |   68.6    |
 
 ### Abstracter (model of 81000 iteration)
 
-| ROUGE-1 F-1 score | ROUGE-1 F-1 score |ROUGE-1 F-1 score| 
+| ROUGE-1 F-1 score | ROUGE-2 F-1 score |ROUGE-L F-1 score| 
 |:----------:|:---------:|:-----------:|
 |     45.4   |    21.8   |   42.1   |
 
 ### Unified model with inconsistency loss (best evaluation model)
 
-| ROUGE-1 F-1 score | ROUGE-1 F-1 score |ROUGE-1 F-1 score| 
+| ROUGE-1 F-1 score | ROUGE-2 F-1 score |ROUGE-L F-1 score| 
 |:----------:|:---------:|:-----------:|
 |     40.68   |    17.97   |   37.13   |
 
