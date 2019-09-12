@@ -31,19 +31,21 @@ You can use our preprocessing codes ([data/make_datafiles.py](./data/make_datafi
 
 Use the sample scripts in `scripts` folder. 
 
+I will use `${XXX}` to indicates the value you set in the script for the variable `XXX`.
+
 ### Pretrain the exatrctor
 
 ```
 sh scripts/selector.sh
 ```
-The trained models will be saved in `log/selector/${YOUR_EXP_NAME}` directory.
+The trained models will be saved in `log/selector/${EXP_NAME}` directory.
 
 ### Pretrain the abstracter
 
 ```
 sh scripts/rewriter.sh
 ```
-The trained models will be saved in `log/rewriter/${YOUR_EXP_NAME}` directory.
+The trained models will be saved in `log/rewriter/${EXP_NAME}` directory.
 
 ### End-to-end training the unified model
 
@@ -53,7 +55,7 @@ Set the path of pretrained extractor and abstractor to `SELECTOR_PATH` and `REWR
 sh scripts/end2end.sh
 ```
 
-The trained models will be saved in `log/end2end/${YOUR_EXP_NAME}` directory.
+The trained models will be saved in `log/end2end/${EXP_NAME}` directory.
 
 **Note**: In our paper, we use the best extractor model on validation set for the pretrained extractor and the last abstracter model (after training with coverage mechanism for 1k iterations) for the pretrained abstracter in end-to-end training.
 
@@ -68,7 +70,7 @@ For the ROUGE evaluation, you can use greedy search or beam search. Just switch 
 We highly recommend you to use **greedy search** for concurrent ROUGE evaluation since greedy search is much faster than beam search.
 It takes about 30 minutes for greedy search while 7 hours for beam search on CNN/Daily Mail test set.
 
-The current best models will be saved in `log/${MODEL}/${YOUR_EXP_NAME}/eval(_${EVAL_METHOD})`.
+The current best models will be saved in `log/${MODEL}/${EXP_NAME}/eval(_${EVAL_METHOD})`.
 
 ## How to evaluate with ROUGE on test set
 
@@ -78,7 +80,7 @@ If you want to use the best evaluation model, set `LOAD_BEST_EVAL_MODEL` as `Tru
 
 If you didn't set the `CKPT_PATH` or turn on `LOAD_BEST_EVAL_MODEL`, it will automatically load the latest model in `train` directory.
 
-The evalutation results will be saved under your experiment directory `log/${MODEL}/${YOUR_EXP_NAME}/`.
+The evalutation results will be saved under your experiment directory `log/${MODEL}/${EXP_NAME}/`.
 
 ## Expected results
 
