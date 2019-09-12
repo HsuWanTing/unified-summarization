@@ -32,5 +32,5 @@ then
   python main.py --model=selector --mode=eval --data_path=$VAL_PATH --vocab_path=$VOCAB_PATH --log_root=log --exp_name=$EXP_NAME --max_art_len=50 --max_sent_len=50 --batch_size=$BATCH_SIZE
 elif [ "$MODE" = "evalall" ]
 then
-  python main.py --model=selector --mode=evalall --data_path=$TEST_PATH --vocab_path=$VOCAB_PATH --log_root=log --exp_name=$EXP_NAME --max_art_len=50 --max_sent_len=50 --max_select_sent=$MAX_SELECT --single_pass=True --select_method=$SELECT_METHOD --thres=$THRES --save_pkl=$SAVE_PK --eval_ckpt_path=$CKPT_PATH --load_best_eval_model=$LOAD_BEST_EVAL_MODEL
+  python main.py --model=selector --mode=evalall --data_path=$TEST_PATH --vocab_path=$VOCAB_PATH --log_root=log --exp_name=$EXP_NAME --max_art_len=50 --max_sent_len=50 --max_select_sent=$MAX_SELECT --single_pass=True --select_method=$SELECT_METHOD --thres=$THRES --save_pkl=$SAVE_PKL --eval_ckpt_path=$CKPT_PATH --load_best_eval_model=$LOAD_BEST_EVAL_MODEL
 fi
